@@ -254,8 +254,10 @@ export class SubprocessKernel {
         if (lastNl >= 0) {
           const complete = stderrBuf.substring(0, lastNl + 1);
           stderrBuf = stderrBuf.substring(lastNl + 1);
+          // Strip ANSI escape codes (Python 3.11+ emits coloured tracebacks)
+          const noAnsi = complete.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
           // Filter out the Python REPL prompts (>>> and ...)
-          const filtered = complete.replace(/^(>>>|\.\.\.) ?/gm, "").trimEnd();
+          const filtered = noAnsi.replace(/^(>>>|\.\.\.) ?/gm, "").trimEnd();
           if (filtered) onChunk({ type: "error", text: filtered + "\n" });
         }
       };

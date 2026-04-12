@@ -1,8 +1,9 @@
-import { Notice, Plugin } from "obsidian";
+import { MarkdownView, Notice, Plugin, TFile } from "obsidian";
 import { DEFAULT_SETTINGS, PluginSettings } from "./settings/Settings";
 import { SettingsTab } from "./settings/SettingsTab";
 import { SubprocessKernel } from "./kernels/SubprocessKernel";
 import { processCodeBlock, RunButtonContext } from "./RunButton";
+import { runAll } from "./RunAll";
 
 export default class MarkdownNotebookPlugin extends Plugin {
   settings: PluginSettings;
@@ -39,6 +40,20 @@ export default class MarkdownNotebookPlugin extends Plugin {
       callback: () => {
         this.kernel.interrupt();
         new Notice("Kernel interrupted");
+      },
+    });
+
+    this.addCommand({
+      id: "run-all-cells",
+      name: "Run all cells",
+      callback: () => {
+        const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+        const file = view?.file;
+        if (!(file instanceof TFile)) {
+          new Notice("No active Markdown file.");
+          return;
+        }
+        runAll(this.app, file, this.kernel, this.settings);
       },
     });
   }

@@ -62,9 +62,9 @@
 
 .nb-stream-stderr {
   margin: 0;
-  padding: 0;
+  padding: 0.4em 0.75em;
   background: transparent;
-  border: none;
+  border-left: 3px solid var(--text-error);
   font-family: var(--font-monospace);
   font-size: var(--font-smaller);
   white-space: pre-wrap;
