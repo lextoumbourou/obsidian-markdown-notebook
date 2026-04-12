@@ -18,24 +18,24 @@ import {
   extractImageData,
   OutputChunk,
 } from "./output/MimeRenderer";
-import type { SubprocessKernel } from "./kernels/SubprocessKernel";
+import type { BaseKernel } from "./kernels/BaseKernel";
+import type { ShellKernel } from "./kernels/ShellKernel";
+
+type AnyKernel = BaseKernel | ShellKernel;
 
 export interface RunButtonContext {
   app: App;
   getSettings: () => import("./settings/Settings").PluginSettings;
-  getKernel: () => SubprocessKernel;
+  getKernel: (lang: string) => AnyKernel;
 }
 
 /** Args parsed from the `{run key=value}` info-string annotation. */
 export interface RunArgs {
-  output?: string;  // e.g. "image"
+  id?: string;
+  output?: string;
   [key: string]: string | undefined;
 }
 
-/**
- * Parse run args from the opening fence line, e.g. "python {run output=image}".
- * Returns null if `{run}` is not present.
- */
 function parseRunArgs(openingLine: string): RunArgs | null {
   const match = openingLine.match(/\{run([^}]*)\}/);
   if (!match) return null;
@@ -46,13 +46,9 @@ function parseRunArgs(openingLine: string): RunArgs | null {
   return args;
 }
 
-/**
- * Render a plain Python block using Prism.js (bundled with Obsidian).
- * Used for non-run blocks and as the base for run blocks.
- */
-function renderPlainCodeBlock(src: string, el: HTMLElement): HTMLPreElement {
+function renderPlainCodeBlock(src: string, el: HTMLElement, language: string): HTMLPreElement {
   const pre = el.createEl("pre");
-  const code = pre.createEl("code", { cls: "language-python" });
+  const code = pre.createEl("code", { cls: `language-${language}` });
   code.textContent = src;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (window as any).Prism?.highlightElement(code);
@@ -60,23 +56,18 @@ function renderPlainCodeBlock(src: string, el: HTMLElement): HTMLPreElement {
 }
 
 /**
- * Registered via plugin.registerMarkdownCodeBlockProcessor('python', ...).
- *
- * - Blocks with `{run}` in the info string: render with run button + handle execution
- * - Plain `python` blocks: render as normal syntax-highlighted code (fall-through)
+ * Registered via plugin.registerMarkdownCodeBlockProcessor(language, ...).
+ * language is the canonical name (python, javascript, bash, r).
  */
 export async function processCodeBlock(
   src: string,
   el: HTMLElement,
   ctx: MarkdownPostProcessorContext,
-  context: RunButtonContext
+  context: RunButtonContext,
+  language: string
 ): Promise<void> {
   const { app } = context;
 
-  // Check if this is a run block by finding the opening fence line.
-  // We search from lineStart→lineEnd rather than assuming lineStart IS the fence,
-  // because Obsidian sometimes groups a preceding HTML block (nb-output) with the
-  // code block into one section, making lineStart point at the HTML line.
   const sectionInfo = ctx.getSectionInfo(el);
   let runArgs: RunArgs | null = null;
 
@@ -84,23 +75,23 @@ export async function processCodeBlock(
     const lines = sectionInfo.text.split("\n");
     for (let i = sectionInfo.lineStart; i <= sectionInfo.lineEnd; i++) {
       const line = lines[i] ?? "";
-      if (line.startsWith("```python")) {
+      if (line.startsWith("```")) {
         runArgs = parseRunArgs(line);
         break;
       }
     }
   }
 
-  // Plain python block — render normally and exit
+  // Plain block — render with syntax highlighting and exit
   if (!runArgs) {
-    renderPlainCodeBlock(src, el);
+    renderPlainCodeBlock(src, el, language);
     return;
   }
 
   const settings = context.getSettings();
-  const kernel = context.getKernel();
-  const pre = renderPlainCodeBlock(src, el);
-  const hash = await hashCodeFence("python", src);
+  const kernel = context.getKernel(language);
+  const pre = renderPlainCodeBlock(src, el, language);
+  const hash = await hashCodeFence(language, src);
 
   // Run button + execution count badge
   const buttonWrap = pre.createDiv({ cls: "nb-run-button-wrap" });
@@ -137,13 +128,14 @@ export async function processCodeBlock(
       new Notice(`Notebook: ${msg}`);
     }
 
-    // Write final output atomically to the file
     if (sectionInfo) {
       const file = app.vault.getAbstractFileByPath(ctx.sourcePath);
       if (file instanceof TFile) {
         try {
-          const { content, format } = await buildOutput(app, file, hash, chunks, runArgs, settings.mediaPath, settings.markdownImageLinks);
-          await writeOutputBlock(app, file, sectionInfo.lineEnd, hash, content, format, runArgs.id);
+          const { content, format } = await buildOutput(
+            app, file, hash, chunks, runArgs!, settings.mediaPath, settings.markdownImageLinks
+          );
+          await writeOutputBlock(app, file, sectionInfo.lineEnd, hash, content, format, runArgs!.id);
         } catch (err) {
           console.error("[MarkdownNotebook] Failed to write output block:", err);
         }
@@ -151,17 +143,12 @@ export async function processCodeBlock(
     }
 
     liveEl.remove();
-    button.classList.remove("nb-run-button--running", "nb-run-button--stale");
+    button.classList.remove("nb-run-button--running");
     button.setText("▶ Run");
-    countBadge.textContent = `[${context.getKernel().executionCount}]`;
+    countBadge.textContent = `[${context.getKernel(language).executionCount}]`;
   });
 }
 
-/**
- * Convert execution chunks to the storable content string + format,
- * based on the `output` run arg. Falls back to html if the requested
- * format can't be satisfied (e.g. no image was generated).
- */
 async function buildOutput(
   app: App,
   file: TFile,
@@ -171,20 +158,17 @@ async function buildOutput(
   mediaPath: string,
   markdownImageLinks: boolean
 ): Promise<{ content: string; format: OutputFormat }> {
-  const req = runArgs.output;
-
-  if (req === "markdown") {
+  if (runArgs.output === "markdown") {
     return { content: renderChunksToMarkdown(chunks), format: "markdown" };
   }
-
-  if (req === "image") {
+  if (runArgs.output === "image") {
     const imgData = extractImageData(chunks);
     if (imgData) {
-      const { filename, vaultPath } = await saveImageToVault(app, file, runArgs.id, hash, imgData, mediaPath);
+      const { filename, vaultPath } = await saveImageToVault(
+        app, file, runArgs.id, hash, imgData, mediaPath
+      );
       return { content: imageLink(filename, vaultPath, file, markdownImageLinks), format: "image" };
     }
-    // No image produced — fall through to HTML
   }
-
   return { content: renderChunksToHtml(chunks), format: "html" };
 }

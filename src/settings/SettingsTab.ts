@@ -13,19 +13,9 @@ export class SettingsTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
 
-    new Setting(containerEl)
-      .setName("Python path")
-      .setDesc("Path to the Python executable (e.g. python3 or /usr/bin/python3)")
-      .addText((text) =>
-        text
-          .setPlaceholder("python3")
-          .setValue(this.plugin.settings.pythonPath)
-          .onChange(async (value) => {
-            this.plugin.settings.pythonPath = value;
-            await this.plugin.saveSettings();
-            this.plugin.restartKernel();
-          })
-      );
+    // ── Execution ────────────────────────────────────────────────────────────
+
+    containerEl.createEl("h3", { text: "Execution" });
 
     new Setting(containerEl)
       .setName("Execution timeout (ms)")
@@ -43,9 +33,22 @@ export class SettingsTab extends PluginSettingTab {
           })
       );
 
+    // ── Language paths ───────────────────────────────────────────────────────
+
+    containerEl.createEl("h3", { text: "Language paths" });
+
+    this.addPathSetting(containerEl, "Python", "python3", "pythonPath", true);
+    this.addPathSetting(containerEl, "Node.js", "node", "nodePath", false);
+    this.addPathSetting(containerEl, "Shell", "bash", "shellPath", false);
+    this.addPathSetting(containerEl, "R", "R", "rPath", false);
+
+    // ── Output ───────────────────────────────────────────────────────────────
+
+    containerEl.createEl("h3", { text: "Output" });
+
     new Setting(containerEl)
       .setName("Media folder")
-      .setDesc("Vault-relative folder for saved images (e.g. attachments). Leave empty to save next to each note.")
+      .setDesc("Vault-relative folder for saved images (e.g. attachments). Empty = save next to the note.")
       .addText((text) =>
         text
           .setPlaceholder("attachments")
@@ -68,15 +71,39 @@ export class SettingsTab extends PluginSettingTab {
           })
       );
 
+    // ── Kernel ───────────────────────────────────────────────────────────────
+
+    containerEl.createEl("h3", { text: "Kernel" });
+
     new Setting(containerEl)
-      .setName("Restart kernel")
-      .setDesc("Kill and restart the Python kernel, clearing all variables")
+      .setName("Restart all kernels")
+      .setDesc("Kill and restart every language kernel, clearing all variables")
       .addButton((btn) =>
         btn
-          .setButtonText("Restart")
+          .setButtonText("Restart all")
           .setWarning()
-          .onClick(() => {
-            this.plugin.restartKernel();
+          .onClick(() => this.plugin.restartKernel())
+      );
+  }
+
+  private addPathSetting(
+    containerEl: HTMLElement,
+    label: string,
+    placeholder: string,
+    key: "pythonPath" | "nodePath" | "shellPath" | "rPath",
+    restartOnChange: boolean
+  ): void {
+    new Setting(containerEl)
+      .setName(`${label} path`)
+      .setDesc(`Path to the ${label} executable`)
+      .addText((text) =>
+        text
+          .setPlaceholder(placeholder)
+          .setValue(this.plugin.settings[key])
+          .onChange(async (value) => {
+            this.plugin.settings[key] = value;
+            await this.plugin.saveSettings();
+            if (restartOnChange) this.plugin.restartKernel(key);
           })
       );
   }
