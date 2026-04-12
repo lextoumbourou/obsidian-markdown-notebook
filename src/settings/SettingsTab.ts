@@ -44,6 +44,31 @@ export class SettingsTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
+      .setName("Media folder")
+      .setDesc("Vault-relative folder for saved images (e.g. attachments). Leave empty to save next to each note.")
+      .addText((text) =>
+        text
+          .setPlaceholder("attachments")
+          .setValue(this.plugin.settings.mediaPath)
+          .onChange(async (value) => {
+            this.plugin.settings.mediaPath = value.trim();
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName("Markdown image links")
+      .setDesc("Use standard Markdown links ![](path) instead of Obsidian wikilinks ![[file]] for saved images")
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.markdownImageLinks)
+          .onChange(async (value) => {
+            this.plugin.settings.markdownImageLinks = value;
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(containerEl)
       .setName("Restart kernel")
       .setDesc("Kill and restart the Python kernel, clearing all variables")
       .addButton((btn) =>

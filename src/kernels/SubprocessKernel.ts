@@ -127,6 +127,7 @@ export class SubprocessKernel {
   private setupFile: string | null = null;
   private starting: Promise<void> | null = null;
   private execQueue: Promise<void> = Promise.resolve();
+  executionCount = 0;
 
   constructor(pythonPath: string) {
     this.pythonPath = pythonPath;
@@ -216,6 +217,7 @@ export class SubprocessKernel {
         clearTimeout(timer);
         this.process?.stdout.removeListener("data", onStdout);
         this.process?.stderr.removeListener("data", onStderr);
+        this.executionCount++;
         resolve();
       };
 
@@ -305,6 +307,7 @@ export class SubprocessKernel {
       this.process = null;
       this.starting = null;
     }
+    this.executionCount = 0;
     if (this.setupFile) {
       fs.promises.rm(this.setupFile).catch(() => {});
       this.setupFile = null;

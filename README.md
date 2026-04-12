@@ -1,6 +1,6 @@
 # Obsidian Markdown Notebook
 
-An experimental Obsidian plugin that brings a Jupyter-style notebook experience to plain Markdown files. Code cells execute directly in your notes, and their outputs — text, tables, plots — are stored as HTML in the file itself.
+An experimental Obsidian plugin that brings a Jupyter-style notebook experience to plain Markdown files. Code cells execute directly in your notes, and their outputs — text, tables, plots — are stored in the file itself.
 
 ## How It Works
 
@@ -15,24 +15,25 @@ df
 ```
 ````
 
-Click the **▶ Run** button to execute the cell. The output is stored directly in the Markdown file as an HTML comment block:
+Click the **▶ Run** button to execute the cell. The output is stored directly in the Markdown file as a comment block immediately below the cell:
 
 ```html
-<!-- nb-output hash="a3f1b2c4d5e6f7a8" -->
+<!-- nb-output hash="a3f1b2c4d5e6f7a8" format="html" -->
 <div class="nb-output">
   <table>...</table>
 </div>
 <!-- /nb-output -->
 ```
 
-The hash is computed from the cell's source code. If you edit the cell, the run button turns orange to indicate the stored output may be stale.
+Comment markers are invisible in all standard Markdown renderers. The content between them renders as HTML (or native Markdown/images — see Output formats below).
 
 ## Features
 
 - **Native Markdown** — outputs are stored in the `.md` file, no sidecar files required
 - **Persistent outputs** — outputs survive Obsidian restarts and render in reading view
-- **Rich output rendering** — HTML tables (pandas DataFrames), matplotlib plots, and plain text
-- **Staleness detection** — the run button indicates when stored output is out of date
+- **Rich output rendering** — HTML tables, matplotlib plots, plain text, Markdown, and saved images
+- **Execution count** — `[N]` badge on each run button, Jupyter-style, resets on kernel restart
+- **Run All** — execute every cell in the note in order with a single command
 - **Shared kernel state** — variables defined in one cell are available in subsequent cells
 - **Export-friendly** — outputs render correctly in Pelican, PDF, and any HTML-aware renderer
 
@@ -42,6 +43,7 @@ The hash is computed from the cell's source code. If you edit the cell, the run 
 - Python 3.8 or later
 
 Optional but recommended:
+
 - `pandas` — for DataFrame rendering
 - `matplotlib` — for inline plots
 
@@ -49,24 +51,56 @@ Optional but recommended:
 
 ### Running cells
 
-Add `{run}` to any Python code block info string and click the run button that appears in reading view. Output is written to the file immediately below the cell.
+Add `{run}` to any Python code block and click **▶ Run** in reading view. The `[N]` badge to the left of the button shows how many cells have executed since the kernel started.
 
-### Passing arguments
+### Output formats
 
-Additional arguments can be specified in the info string:
+Control how the output is stored with the `output` argument:
 
+| Argument | Stored as | Best for |
+|---|---|---|
+| `output=html` | HTML in comment block (default) | DataFrames, rich objects |
+| `output=markdown` | Raw Markdown in comment block | Plain tables, text output |
+| `output=image` | PNG saved to vault, `![[...]]` link | Matplotlib plots |
+
+Examples:
+
+````markdown
+```python {run output=markdown}
+df.to_markdown(index=False)
 ```
+````
+
+````markdown
 ```python {run output=image}
+import matplotlib.pyplot as plt
+plt.plot([1, 2, 3])
+plt.show()
 ```
+````
 
-Argument support is currently limited but will expand in future phases.
+If `output=image` is requested but no image was generated, the output falls back to HTML automatically.
+
+### Cell IDs
+
+Assign a stable identifier to a cell with `id=`:
+
+````markdown
+```python {run output=image id=revenue-chart}
+...
+plt.show()
+```
+````
+
+The ID is stored in the comment marker and used as the image filename (`revenue-chart.png`). Without an ID, images are named `notename-nb-<hash>.png`. IDs make image filenames stable across re-runs and easier to reference from other notes.
 
 ### Commands
 
 | Command | Description |
 |---|---|
-| Markdown Notebook: Restart Python kernel | Kills and restarts the kernel, clearing all variables |
-| Markdown Notebook: Interrupt Python kernel | Sends SIGINT to the running kernel |
+| Markdown Notebook: Run all cells | Execute every `{run}` cell in the active note, top to bottom |
+| Markdown Notebook: Restart Python kernel | Kill and restart the kernel, clearing all variables |
+| Markdown Notebook: Interrupt Python kernel | Send SIGINT to a running cell |
 
 ### Settings
 
@@ -74,32 +108,46 @@ Argument support is currently limited but will expand in future phases.
 |---|---|---|
 | Python path | `python3` | Path to the Python executable |
 | Execution timeout | `30000` | Maximum execution time per cell (ms) |
+| Media folder | *(empty)* | Vault-relative folder for saved images (e.g. `attachments`). Empty = save next to the note. Created automatically if it doesn't exist. |
 
-## Output Format
+## Output Block Format
 
-Outputs are stored as raw HTML between HTML comment markers:
+Outputs are stored between HTML comment markers:
 
 ```
-<!-- nb-output hash="<hex>" -->
-<div class="nb-output">...</div>
+<!-- nb-output hash="<hex>" format="<format>" -->
+<content>
 <!-- /nb-output -->
 ```
 
-The `hash` is a SHA-256 digest (truncated to 8 bytes) of the cell's language identifier and source code. It is used to detect when a stored output no longer matches the current source.
+Optional attributes:
 
-This format is intentionally simple and human-readable. The comment markers are invisible in all standard Markdown renderers. The HTML content between them renders correctly in Obsidian, Pelican, and PDF export. GitHub rendering is not a goal.
+| Attribute | Description |
+|---|---|
+| `hash` | SHA-256 digest (8 bytes) of the cell's language + source. Used for staleness detection. |
+| `format` | `html`, `markdown`, or `image`. Absent on legacy blocks means `html`. |
+| `id` | Cell identifier, if set. Used in image filenames and for future tooling. |
+
+Example markers:
+
+```html
+<!-- nb-output hash="a3f1b2c4" format="html" -->
+<!-- nb-output id="revenue-chart" hash="a3f1b2c4" format="image" -->
+```
+
+This format is intentionally simple and human-readable. GitHub rendering is not a goal.
 
 ## Security Note
 
-Output blocks contain raw HTML generated by your code. This is intentional — it is what enables rich rendering of tables, plots, and other output types. The trust model is the same as Jupyter notebooks: the outputs are as trustworthy as the code that produced them. Do not open notebooks from untrusted sources.
+Output blocks contain raw HTML generated by your code. This is intentional — it is what enables rich rendering of tables and plots. The trust model is the same as Jupyter notebooks: outputs are as trustworthy as the code that produced them. Do not open notebooks from untrusted sources.
 
 ## Similar Projects
 
 **[JupyMD for Obsidian](https://github.com/d-eniz/jupymd)**
-Uses [Jupytext](https://github.com/mwouts/jupytext) to pair Markdown files with `.ipynb` notebooks. A solid solution for most people, but requires the full Jupyter stack and stores outputs in the companion `.ipynb` rather than inline in Markdown.
+Uses [Jupytext](https://github.com/mwouts/jupytext) to pair Markdown files with `.ipynb` notebooks. Requires the full Jupyter stack; outputs live in the companion `.ipynb`, not inline in Markdown.
 
 **[Obsidian Execute Code Plugin](https://github.com/twibiral/obsidian-execute-code)**
-The closest prior art. Supports many languages and has a polished UI. Outputs are stored as plain text in fenced `output` blocks rather than as rendered HTML, and there is no staleness detection.
+The closest prior art. Supports many languages and has a polished UI. Outputs are stored as plain text in fenced `output` blocks rather than as rendered HTML; no staleness detection.
 
 **[Jupyter Notebook](https://github.com/jupyter/notebook)**
 The primary inspiration. This project aims to bring Jupyter's output rendering quality into Obsidian without requiring the Jupyter server.

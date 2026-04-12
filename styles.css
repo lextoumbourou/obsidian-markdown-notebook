@@ -26,6 +26,27 @@
   background: var(--color-orange);
 }
 
+/* Run button wrapper (holds count badge + button, floated right) */
+.nb-run-button-wrap {
+  float: right;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 4px 4px 0 0;
+}
+
+.nb-run-button-wrap .nb-run-button {
+  float: none;
+  margin: 0;
+}
+
+.nb-exec-count {
+  font-family: var(--font-monospace);
+  font-size: 11px;
+  color: var(--text-muted);
+  user-select: none;
+}
+
 /* Output containers */
 .nb-output {
   border-left: 3px solid var(--interactive-accent);

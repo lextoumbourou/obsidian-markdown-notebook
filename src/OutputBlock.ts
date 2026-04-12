@@ -1,14 +1,35 @@
 import { App, TFile } from "obsidian";
 
+export type OutputFormat = "html" | "markdown" | "image";
+
 export interface OutputBlock {
+  id?: string;
   hash: string;
-  html: string;
-  lineStart: number; // line index of <!-- nb-output hash="..." -->
+  content: string;
+  format: OutputFormat;
+  lineStart: number; // line index of <!-- nb-output ... -->
   lineEnd: number;   // line index of <!-- /nb-output -->
 }
 
-const NB_OUTPUT_START = /^<!-- nb-output hash="([0-9a-f]+)" -->$/;
+const NB_OUTPUT_RE = /^<!-- nb-output (.*?)-->$/;
 const NB_OUTPUT_END = /^<!-- \/nb-output -->$/;
+
+/** Parse key="value" pairs out of the nb-output comment attributes. */
+function parseAttrs(attrStr: string): Record<string, string> {
+  const attrs: Record<string, string> = {};
+  for (const m of attrStr.matchAll(/(\w+)="([^"]*)"/g)) {
+    attrs[m[1]] = m[2];
+  }
+  return attrs;
+}
+
+/** Serialise an attribute object back to a string, omitting undefined values. */
+function serializeAttrs(attrs: Record<string, string | undefined>): string {
+  return Object.entries(attrs)
+    .filter(([, v]) => v !== undefined)
+    .map(([k, v]) => `${k}="${v}"`)
+    .join(" ");
+}
 
 /**
  * Find the nb-output block immediately following codeFenceEndLine.
@@ -18,20 +39,23 @@ export function findOutputBlock(lines: string[], codeFenceEndLine: number): Outp
   const searchLimit = Math.min(codeFenceEndLine + 3, lines.length);
 
   for (let i = codeFenceEndLine + 1; i < searchLimit; i++) {
-    const match = lines[i].match(NB_OUTPUT_START);
+    const match = lines[i].match(NB_OUTPUT_RE);
     if (!match) {
-      if (lines[i].trim() !== "") break; // non-blank, non-marker line — stop
+      if (lines[i].trim() !== "") break;
       continue;
     }
 
-    const hash = match[1];
-    const lineStart = i;
+    const attrs = parseAttrs(match[1]);
+    if (!attrs.hash) continue;
 
+    const lineStart = i;
     for (let j = i + 1; j < lines.length; j++) {
       if (NB_OUTPUT_END.test(lines[j])) {
         return {
-          hash,
-          html: lines.slice(i + 1, j).join("\n"),
+          id: attrs.id,
+          hash: attrs.hash,
+          content: lines.slice(i + 1, j).join("\n"),
+          format: (attrs.format as OutputFormat | undefined) ?? "html",
           lineStart,
           lineEnd: j,
         };
@@ -42,27 +66,40 @@ export function findOutputBlock(lines: string[], codeFenceEndLine: number): Outp
   return null;
 }
 
-/**
- * Replace an existing nb-output block in-place.
- */
-function replaceBlock(lines: string[], block: OutputBlock, hash: string, html: string): string[] {
+function makeMarker(id: string | undefined, hash: string, format: OutputFormat): string {
+  const attrs = serializeAttrs({ id, hash, format });
+  return `<!-- nb-output ${attrs} -->`;
+}
+
+function replaceBlock(
+  lines: string[],
+  block: OutputBlock,
+  id: string | undefined,
+  hash: string,
+  content: string,
+  format: OutputFormat
+): string[] {
   return [
     ...lines.slice(0, block.lineStart),
-    `<!-- nb-output hash="${hash}" -->`,
-    html,
+    makeMarker(id, hash, format),
+    content,
     `<!-- /nb-output -->`,
     ...lines.slice(block.lineEnd + 1),
   ];
 }
 
-/**
- * Insert a new nb-output block after codeFenceEndLine.
- */
-function insertBlock(lines: string[], codeFenceEndLine: number, hash: string, html: string): string[] {
+function insertBlock(
+  lines: string[],
+  codeFenceEndLine: number,
+  id: string | undefined,
+  hash: string,
+  content: string,
+  format: OutputFormat
+): string[] {
   return [
     ...lines.slice(0, codeFenceEndLine + 1),
-    `<!-- nb-output hash="${hash}" -->`,
-    html,
+    makeMarker(id, hash, format),
+    content,
     `<!-- /nb-output -->`,
     ...lines.slice(codeFenceEndLine + 1),
   ];
@@ -77,14 +114,16 @@ export async function writeOutputBlock(
   file: TFile,
   codeFenceEndLine: number,
   hash: string,
-  html: string
+  content: string,
+  format: OutputFormat = "html",
+  id?: string
 ): Promise<void> {
-  await app.vault.process(file, (content) => {
-    const lines = content.split("\n");
+  await app.vault.process(file, (raw) => {
+    const lines = raw.split("\n");
     const existing = findOutputBlock(lines, codeFenceEndLine);
     const updated = existing
-      ? replaceBlock(lines, existing, hash, html)
-      : insertBlock(lines, codeFenceEndLine, hash, html);
+      ? replaceBlock(lines, existing, id, hash, content, format)
+      : insertBlock(lines, codeFenceEndLine, id, hash, content, format);
     return updated.join("\n");
   });
 }
@@ -97,13 +136,75 @@ export async function clearOutputBlock(
   file: TFile,
   codeFenceEndLine: number
 ): Promise<void> {
-  await app.vault.process(file, (content) => {
-    const lines = content.split("\n");
+  await app.vault.process(file, (raw) => {
+    const lines = raw.split("\n");
     const block = findOutputBlock(lines, codeFenceEndLine);
-    if (!block) return content;
+    if (!block) return raw;
     return [
       ...lines.slice(0, block.lineStart),
       ...lines.slice(block.lineEnd + 1),
     ].join("\n");
   });
+}
+
+/**
+ * Save a base64-encoded PNG to the vault.
+ * Returns { filename, vaultPath } — filename for wikilinks, vaultPath for computing relative paths.
+ */
+export async function saveImageToVault(
+  app: App,
+  noteFile: TFile,
+  id: string | undefined,
+  hash: string,
+  base64: string,
+  mediaPath: string
+): Promise<{ filename: string; vaultPath: string }> {
+  const filename = id ? `${id}.png` : `${noteFile.basename}-nb-${hash}.png`;
+  const dir = mediaPath.trim() || noteFile.parent?.path || "";
+  const vaultPath = dir ? `${dir}/${filename}` : filename;
+
+  const binaryStr = atob(base64);
+  const ab = new ArrayBuffer(binaryStr.length);
+  const view = new Uint8Array(ab);
+  for (let i = 0; i < binaryStr.length; i++) view[i] = binaryStr.charCodeAt(i);
+
+  const existing = app.vault.getAbstractFileByPath(vaultPath);
+  if (existing instanceof TFile) {
+    await app.vault.modifyBinary(existing, ab);
+  } else {
+    if (dir && !app.vault.getAbstractFileByPath(dir)) {
+      await app.vault.createFolder(dir);
+    }
+    await app.vault.createBinary(vaultPath, ab);
+  }
+
+  return { filename, vaultPath };
+}
+
+/**
+ * Format a saved image as a link string.
+ * - wikilink:  ![[filename.png]]
+ * - markdown:  ![](relative/path/to/filename.png)
+ */
+export function imageLink(
+  filename: string,
+  vaultPath: string,
+  noteFile: TFile,
+  useMarkdown: boolean
+): string {
+  if (!useMarkdown) return `![[${filename}]]`;
+  const noteDir = noteFile.parent?.path ?? "";
+  return `![](${relativeVaultPath(noteDir, vaultPath)})`;
+}
+
+/** Compute a path to `targetVaultPath` relative to `fromDir` (both vault-relative). */
+function relativeVaultPath(fromDir: string, targetVaultPath: string): string {
+  const from = fromDir ? fromDir.split("/") : [];
+  const to = targetVaultPath.split("/");
+  let common = 0;
+  while (common < from.length && common < to.length && from[common] === to[common]) {
+    common++;
+  }
+  const ups = from.length - common;
+  return [...Array(ups).fill(".."), ...to.slice(common)].join("/");
 }

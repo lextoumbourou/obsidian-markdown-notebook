@@ -43,6 +43,36 @@ function renderRich(mime: string, data: string): string {
 }
 
 /**
+ * Convert chunks to a plain markdown/text string for storage.
+ * Prefers text/markdown rich output, falls back to plain text/stdout.
+ */
+export function renderChunksToMarkdown(chunks: OutputChunk[]): string {
+  // Prefer a dedicated markdown representation if one was emitted
+  for (const chunk of chunks) {
+    if (chunk.type === "rich" && chunk.mime === "text/markdown") {
+      return chunk.data.trimEnd();
+    }
+  }
+  // Otherwise collect stdout + errors as plain text
+  const parts: string[] = [];
+  for (const chunk of chunks) {
+    if (chunk.type === "stream" && chunk.stream === "stdout") parts.push(chunk.text);
+    if (chunk.type === "error") parts.push(chunk.text);
+  }
+  return parts.join("").trimEnd();
+}
+
+/**
+ * Return the base64-encoded PNG data from the first image/png chunk, or null.
+ */
+export function extractImageData(chunks: OutputChunk[]): string | null {
+  for (const chunk of chunks) {
+    if (chunk.type === "rich" && chunk.mime === "image/png") return chunk.data;
+  }
+  return null;
+}
+
+/**
  * Append a chunk to a live DOM element during execution.
  */
 export function appendChunkToElement(el: HTMLElement, chunk: OutputChunk): void {

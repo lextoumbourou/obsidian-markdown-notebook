@@ -5,8 +5,19 @@ import {
   TFile,
 } from "obsidian";
 import { hashCodeFence } from "./HashUtils";
-import { findOutputBlock, writeOutputBlock } from "./OutputBlock";
-import { appendChunkToElement, renderChunksToHtml, OutputChunk } from "./output/MimeRenderer";
+import {
+  writeOutputBlock,
+  saveImageToVault,
+  imageLink,
+  OutputFormat,
+} from "./OutputBlock";
+import {
+  appendChunkToElement,
+  renderChunksToHtml,
+  renderChunksToMarkdown,
+  extractImageData,
+  OutputChunk,
+} from "./output/MimeRenderer";
 import type { SubprocessKernel } from "./kernels/SubprocessKernel";
 
 export interface RunButtonContext {
@@ -91,21 +102,15 @@ export async function processCodeBlock(
   const pre = renderPlainCodeBlock(src, el);
   const hash = await hashCodeFence("python", src);
 
-  // Check staleness against any stored output block
-  let isStale = false;
-  if (sectionInfo) {
-    const file = app.vault.getAbstractFileByPath(ctx.sourcePath);
-    if (file instanceof TFile) {
-      const lines = (await app.vault.read(file)).split("\n");
-      const block = findOutputBlock(lines, sectionInfo.lineEnd);
-      if (block) isStale = block.hash !== hash;
-    }
-  }
-
-  // Run button
-  const button = pre.createEl("button", {
-    cls: "nb-run-button" + (isStale ? " nb-run-button--stale" : ""),
-    text: isStale ? "↻ Run" : "▶ Run",
+  // Run button + execution count badge
+  const buttonWrap = pre.createDiv({ cls: "nb-run-button-wrap" });
+  const countBadge = buttonWrap.createEl("span", {
+    cls: "nb-exec-count",
+    text: `[${kernel.executionCount}]`,
+  });
+  const button = buttonWrap.createEl("button", {
+    cls: "nb-run-button",
+    text: "▶ Run",
   });
 
   button.addEventListener("click", async () => {
@@ -132,12 +137,13 @@ export async function processCodeBlock(
       new Notice(`Notebook: ${msg}`);
     }
 
-    // Write final HTML atomically to the file
+    // Write final output atomically to the file
     if (sectionInfo) {
       const file = app.vault.getAbstractFileByPath(ctx.sourcePath);
       if (file instanceof TFile) {
         try {
-          await writeOutputBlock(app, file, sectionInfo.lineEnd, hash, renderChunksToHtml(chunks));
+          const { content, format } = await buildOutput(app, file, hash, chunks, runArgs, settings.mediaPath, settings.markdownImageLinks);
+          await writeOutputBlock(app, file, sectionInfo.lineEnd, hash, content, format, runArgs.id);
         } catch (err) {
           console.error("[MarkdownNotebook] Failed to write output block:", err);
         }
@@ -147,5 +153,38 @@ export async function processCodeBlock(
     liveEl.remove();
     button.classList.remove("nb-run-button--running", "nb-run-button--stale");
     button.setText("▶ Run");
+    countBadge.textContent = `[${context.getKernel().executionCount}]`;
   });
+}
+
+/**
+ * Convert execution chunks to the storable content string + format,
+ * based on the `output` run arg. Falls back to html if the requested
+ * format can't be satisfied (e.g. no image was generated).
+ */
+async function buildOutput(
+  app: App,
+  file: TFile,
+  hash: string,
+  chunks: OutputChunk[],
+  runArgs: RunArgs,
+  mediaPath: string,
+  markdownImageLinks: boolean
+): Promise<{ content: string; format: OutputFormat }> {
+  const req = runArgs.output;
+
+  if (req === "markdown") {
+    return { content: renderChunksToMarkdown(chunks), format: "markdown" };
+  }
+
+  if (req === "image") {
+    const imgData = extractImageData(chunks);
+    if (imgData) {
+      const { filename, vaultPath } = await saveImageToVault(app, file, runArgs.id, hash, imgData, mediaPath);
+      return { content: imageLink(filename, vaultPath, file, markdownImageLinks), format: "image" };
+    }
+    // No image produced — fall through to HTML
+  }
+
+  return { content: renderChunksToHtml(chunks), format: "html" };
 }
