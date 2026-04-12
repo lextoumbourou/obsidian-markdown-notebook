@@ -9,7 +9,7 @@ export const SETUP_DONE_SIGIL = "__NB_SETUP_DONE__";
  * Obsidian launched from the Dock doesn't inherit the user's shell PATH,
  * so executables in /usr/local/bin or /opt/homebrew/bin are otherwise invisible.
  */
-export function kernelEnv(): NodeJS.ProcessEnv {
+export function kernelEnv(): Record<string, string | undefined> {
   const extra = [
     "/usr/local/bin",
     "/opt/homebrew/bin",

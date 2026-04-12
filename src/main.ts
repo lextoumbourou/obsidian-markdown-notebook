@@ -55,9 +55,7 @@ export default class MarkdownNotebookPlugin extends Plugin {
       id: "interrupt-kernel",
       name: "Interrupt kernel",
       callback: () => {
-        const view = this.app.workspace.getActiveViewOfType(MarkdownView);
         // Best-effort: interrupt the most recently active language kernel
-        // (could be improved by tracking active cell language)
         for (const k of this.kernels.values()) k.interrupt();
         new Notice("Kernel interrupted");
       },

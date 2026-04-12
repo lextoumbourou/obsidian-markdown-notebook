@@ -40,18 +40,31 @@ Comment markers are invisible in all standard Markdown renderers. The content be
 ## Requirements
 
 - Obsidian 1.7.2 or later (desktop only)
-- Python 3.8 or later
+- One or more of:
+  - Python 3.8+ (`python3` on PATH)
+  - Node.js 14+ (`node` on PATH)
+  - Bash (`bash` on PATH)
+  - R 4.0+ (`Rscript` on PATH)
 
-Optional but recommended:
+Optional but recommended for Python:
 
 - `pandas` — for DataFrame rendering
 - `matplotlib` — for inline plots
 
 ## Usage
 
+### Supported languages
+
+| Fence language | Aliases | Runtime |
+|---|---|---|
+| `python` | — | Persistent Python 3 subprocess |
+| `javascript` | `js` | Persistent Node.js subprocess |
+| `bash` | `sh`, `shell` | Fresh `bash -c` per cell |
+| `r` | — | Persistent R subprocess |
+
 ### Running cells
 
-Add `{run}` to any Python code block and click **▶ Run** in reading view. The `[N]` badge to the left of the button shows how many cells have executed since the kernel started.
+Add `{run}` to any code block and click **▶ Run** in reading view. The `[N]` badge to the left of the button shows how many cells have executed since the kernel started.
 
 ### Output formats
 
@@ -107,8 +120,12 @@ The ID is stored in the comment marker and used as the image filename (`revenue-
 | Setting | Default | Description |
 |---|---|---|
 | Python path | `python3` | Path to the Python executable |
+| Node.js path | `node` | Path to the Node.js executable |
+| Shell path | `bash` | Path to the shell interpreter |
+| R path | `Rscript` | Path to the R executable |
 | Execution timeout | `30000` | Maximum execution time per cell (ms) |
-| Media folder | *(empty)* | Vault-relative folder for saved images (e.g. `attachments`). Empty = save next to the note. Created automatically if it doesn't exist. |
+| Media folder | *(empty)* | Vault-relative folder for saved images (e.g. `attachments`). Empty = save next to the note. |
+| Markdown image links | off | Use `![](path)` instead of `![[file]]` for saved images |
 
 ## Output Block Format
 
@@ -159,6 +176,23 @@ BRAT will also notify you when new versions are available.
 1. Download `main.js`, `manifest.json`, and `styles.css` from the [latest release](https://github.com/lextoumbourou/obsidian-markdown-notebook/releases)
 2. Copy them into `.obsidian/plugins/obsidian-markdown-notebook/` in your vault
 3. Enable **Markdown Notebook** in Settings → Community Plugins
+
+## Development
+
+```bash
+npm install
+```
+
+| Command | Description |
+|---|---|
+| `npm run dev` | Build in watch mode |
+| `npm run build` | Type-check and build for production |
+| `npm test` | Run the test suite |
+| `npm run test:watch` | Run tests in watch mode |
+| `npm run lint` | Lint `src/` with ESLint |
+| `npm run lint:fix` | Auto-fix lint errors |
+
+Tests live in `__tests__/` and use Jest + ts-jest. The Obsidian API is mocked in `__mocks__/obsidian.ts` so the suite runs without an Obsidian install.
 
 ## Similar Projects
 

@@ -5,12 +5,16 @@ export class TFile {
   path = '';
   name = '';
   basename = '';
-  parent: { path: string } | null = null;
+  parent: TFolder | null = null;
 }
 
 export class TFolder {
   path = '';
   name = '';
+  parent: TFolder | null = null;
+  vault: unknown = null;
+  children: unknown[] = [];
+  isRoot() { return false; }
 }
 
 export class App {}

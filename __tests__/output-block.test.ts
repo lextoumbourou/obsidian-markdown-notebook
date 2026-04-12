@@ -1,4 +1,4 @@
-import { TFile } from 'obsidian';
+import { TFile, TFolder } from 'obsidian';
 import {
   findOutputBlock,
   writeOutputBlock,
@@ -10,7 +10,9 @@ import {
 function makeFile(basename: string, parentPath: string): TFile {
   const f = new TFile();
   f.basename = basename;
-  f.parent = { path: parentPath };
+  const folder = new TFolder();
+  folder.path = parentPath;
+  f.parent = folder;
   return f;
 }
 
@@ -195,7 +197,6 @@ describe('imageLink', () => {
 
   it('handles note at vault root', () => {
     const file = makeFile('analysis', '');
-    file.parent = { path: '' };
     expect(imageLink('plot.png', 'attachments/plot.png', file, true)).toBe('![](attachments/plot.png)');
   });
 });
