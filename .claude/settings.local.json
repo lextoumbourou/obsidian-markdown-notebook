@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(gh pr:*)",
+      "Bash(gh issue:*)",
+      "Bash(gh api:*)",
+      "Bash(python3 -c ':*)",
+      "Bash(python3 -c \" import json, sys raw = sys.stdin.read\\(\\) data = json.loads\\(raw\\) for c in data: print\\(f'--- Comment by @{c[\\\\\"user\\\\\"][\\\\\"login\\\\\"]} on {c[\\\\\"created_at\\\\\"]} ---'\\) print\\(c['body']\\) print\\(\\) \")",
+      "Bash(tee /tmp/pr103_comments.txt)"
+    ]
+  }
+}

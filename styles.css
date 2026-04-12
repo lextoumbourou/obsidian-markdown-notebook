@@ -1,0 +1,117 @@
+/* Markdown Notebook Plugin Styles */
+
+/* Run button */
+.nb-run-button {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border: none;
+  border-radius: 4px;
+  padding: 2px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  float: right;
+  margin: 4px 4px 0 0;
+}
+
+.nb-run-button:hover {
+  background: var(--interactive-accent-hover);
+}
+
+.nb-run-button.nb-run-button--running {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.nb-run-button.nb-run-button--stale {
+  background: var(--color-orange);
+}
+
+/* Output containers */
+.nb-output {
+  border-left: 3px solid var(--interactive-accent);
+  margin: 0 0 1em 0;
+  padding: 0.5em 0.75em;
+  background: var(--background-secondary);
+  overflow-x: auto;
+}
+
+.nb-output--stale {
+  border-left-color: var(--color-orange);
+  opacity: 0.7;
+}
+
+.nb-output--stale::before {
+  content: "⟳ Output may be stale";
+  display: block;
+  font-size: 11px;
+  color: var(--color-orange);
+  margin-bottom: 4px;
+}
+
+/* Stream output */
+.nb-stream-stdout {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  border: none;
+  font-family: var(--font-monospace);
+  font-size: var(--font-smaller);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.nb-stream-stderr {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  border: none;
+  font-family: var(--font-monospace);
+  font-size: var(--font-smaller);
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--text-error);
+}
+
+/* Rich outputs */
+.nb-output-html {
+  overflow-x: auto;
+}
+
+.nb-output-html table {
+  border-collapse: collapse;
+  font-size: var(--font-smaller);
+}
+
+.nb-output-html th,
+.nb-output-html td {
+  border: 1px solid var(--background-modifier-border);
+  padding: 4px 8px;
+  text-align: left;
+}
+
+.nb-output-html th {
+  background: var(--background-secondary-alt);
+  font-weight: 600;
+}
+
+.nb-output-image {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Live streaming output (shown during execution) */
+.nb-live-output {
+  border-left: 3px solid var(--color-yellow);
+  margin: 0 0 1em 0;
+  padding: 0.5em 0.75em;
+  background: var(--background-secondary);
+  overflow-x: auto;
+}
+
+.nb-live-output::before {
+  content: "● Running…";
+  display: block;
+  font-size: 11px;
+  color: var(--color-yellow);
+  margin-bottom: 4px;
+}

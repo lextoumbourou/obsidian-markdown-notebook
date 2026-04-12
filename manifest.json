@@ -1,0 +1,10 @@
+{
+  "id": "obsidian-markdown-notebook",
+  "name": "Markdown Notebook",
+  "version": "0.1.0",
+  "minAppVersion": "1.7.2",
+  "description": "Jupyter-style notebook execution in Markdown files with persistent HTML outputs",
+  "author": "Lex Toumbourou",
+  "authorUrl": "https://github.com/lextoumbourou",
+  "isDesktopOnly": true
+}
