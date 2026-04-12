@@ -3,3 +3,4 @@ main.js
 *.js.map
 reference
 data.json
+.claude/settings.local.json

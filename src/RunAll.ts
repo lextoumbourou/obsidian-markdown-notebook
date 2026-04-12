@@ -24,7 +24,7 @@ interface RunBlock {
 /**
  * Parse all `{run}` blocks from raw file content, for any supported language.
  */
-function parseRunBlocks(content: string): RunBlock[] {
+export function parseRunBlocks(content: string): RunBlock[] {
   const lines = content.split("\n");
   const blocks: RunBlock[] = [];
   let i = 0;
