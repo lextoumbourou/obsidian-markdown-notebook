@@ -1,6 +1,6 @@
 import { App, TFile } from "obsidian";
 
-export type OutputFormat = "html" | "markdown" | "image";
+export type OutputFormat = "html" | "image";
 
 export interface OutputBlock {
   id?: string;
@@ -168,13 +168,20 @@ export async function saveImageToVault(
   const view = new Uint8Array(ab);
   for (let i = 0; i < binaryStr.length; i++) view[i] = binaryStr.charCodeAt(i);
 
-  const existing = app.vault.getAbstractFileByPath(vaultPath);
-  if (existing instanceof TFile) {
-    await app.vault.modifyBinary(existing, ab);
-  } else {
-    if (dir && !app.vault.getAbstractFileByPath(dir)) {
-      await app.vault.createFolder(dir);
+  if (dir && !(await app.vault.adapter.exists(dir))) {
+    await app.vault.createFolder(dir);
+  }
+
+  const fileExists = await app.vault.adapter.exists(vaultPath);
+  if (fileExists) {
+    const f = app.vault.getAbstractFileByPath(vaultPath);
+    if (f instanceof TFile) {
+      await app.vault.modifyBinary(f, ab);
+    } else {
+      // Index is stale — write directly via adapter
+      await app.vault.adapter.writeBinary(vaultPath, ab);
     }
+  } else {
     await app.vault.createBinary(vaultPath, ab);
   }
 

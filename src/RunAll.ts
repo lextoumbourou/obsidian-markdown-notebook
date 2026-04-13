@@ -3,10 +3,10 @@ import { hashCodeFence } from "./HashUtils";
 import { writeOutputBlock, saveImageToVault, imageLink, OutputFormat } from "./OutputBlock";
 import {
   renderChunksToHtml,
-  renderChunksToMarkdown,
   extractImageData,
   OutputChunk,
 } from "./output/MimeRenderer";
+import { renderHtmlToPng } from "./output/HtmlToImage";
 import type { BaseKernel } from "./kernels/BaseKernel";
 import type { ShellKernel } from "./kernels/ShellKernel";
 import type { PluginSettings } from "./settings/Settings";
@@ -118,15 +118,14 @@ async function resolveOutput(
   settings: PluginSettings,
   fm: NotebookFrontmatter,
 ): Promise<{ content: string; format: OutputFormat }> {
-  const outputFormat = formatArg ?? fm.format;
+  const outputFormat = formatArg ?? fm.format ?? settings.defaultFormat;
   const mediaPath = fm.media ?? settings.mediaPath;
   const markdownLinks = fm.markdownLinks ?? settings.markdownImageLinks;
 
-  if (outputFormat === "markdown") {
-    return { content: renderChunksToMarkdown(chunks), format: "markdown" };
-  }
   if (outputFormat === "image") {
-    const imgData = extractImageData(chunks);
+    // Prefer native image data (matplotlib, R plots, etc.)
+    const imgData = extractImageData(chunks) ??
+      await renderHtmlToPng(renderChunksToHtml(chunks));
     if (imgData) {
       const { filename, vaultPath } = await saveImageToVault(app, file, id, hash, imgData, mediaPath);
       return { content: imageLink(filename, vaultPath, file, markdownLinks), format: "image" };

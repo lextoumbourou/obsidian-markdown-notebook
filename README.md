@@ -15,7 +15,7 @@ df
 ```
 ````
 
-Click the **▶ Run** button to execute the cell. The output is stored directly in the Markdown file as a comment block immediately below the cell:
+The output is stored directly in the Markdown file as a comment block immediately below the cell:
 
 ```html
 <!-- nb-output hash="a3f1b2c4d5e6f7a8" format="html" -->
@@ -25,13 +25,13 @@ Click the **▶ Run** button to execute the cell. The output is stored directly 
 <!-- /nb-output -->
 ```
 
-Comment markers are invisible in all standard Markdown renderers. The content between them renders as HTML (or native Markdown/images — see Output formats below).
+Comment markers are invisible in all standard Markdown renderers. The content between them renders as HTML or as a saved image link.
 
 ## Features
 
 - **Native Markdown** — outputs are stored in the `.md` file, no sidecar files required
 - **Persistent outputs** — outputs survive Obsidian restarts and render in reading view
-- **Rich output rendering** — HTML tables, matplotlib plots, plain text, Markdown, and saved images
+- **Rich output rendering** — HTML tables, matplotlib plots, plain text, and saved images
 - **Execution count** — `[N]` badge on each run button, Jupyter-style, resets on kernel restart
 - **Run All** — execute every cell in the note in order with a single command
 - **Shared kernel state** — variables defined in one cell are available in subsequent cells
@@ -68,21 +68,14 @@ Click **▶ Run** on any supported language block in reading view. The `[N]` bad
 
 ### Output formats
 
-Control how the output is stored with the `format` argument:
+Two formats are supported, controlled with the `format` argument:
 
 | Argument | Stored as | Best for |
 |---|---|---|
-| `format=html` | HTML in comment block (default) | DataFrames, rich objects |
-| `format=markdown` | Raw Markdown in comment block | Plain tables, text output |
-| `format=image` | PNG saved to vault, `![[...]]` link | Matplotlib plots |
+| `format=html` | HTML in comment block | DataFrames, rich objects, text (default) |
+| `format=image` | PNG saved to vault, `![[...]]` link | Plots, any output you want as an image |
 
-Examples:
-
-````markdown
-```python {format=markdown}
-df.to_markdown(index=False)
-```
-````
+Example:
 
 ````markdown
 ```python {format=image}
@@ -92,7 +85,9 @@ plt.show()
 ```
 ````
 
-If `format=image` is requested but no image was generated, the output falls back to HTML automatically.
+If `format=image` is set but the code produces no native image (e.g. a DataFrame instead of a plot), the output is rendered to PNG automatically using the browser's layout engine.
+
+The default format is `html` and can be changed in plugin settings or per-note via frontmatter.
 
 ### Cell IDs
 
@@ -105,16 +100,16 @@ plt.show()
 ```
 ````
 
-The ID is stored in the comment marker and used as the image filename (`revenue-chart.png`). Without an ID, images are named `notename-nb-<hash>.png`. IDs make image filenames stable across re-runs and easier to reference from other notes.
+The ID is used as the image filename (`revenue-chart.png`). Without an ID, images are named `notename-nb-<hash>.png`. IDs make filenames stable across re-runs and easier to reference from other notes.
 
 ### Document-level defaults (frontmatter)
 
-Set default args for all cells in a note via the `notebook:` key in frontmatter:
+Set defaults for all cells in a note via the `notebook:` key in frontmatter:
 
 ```yaml
 ---
 notebook:
-  format: html        # default output format (html | markdown | image)
+  format: image       # default output format (html | image)
   media: attachments  # image save folder, relative to vault root
   timeout: 60000      # execution timeout in ms
   markdownLinks: true # use ![](path) instead of ![[file]] for images
@@ -130,19 +125,20 @@ Cell-level args override frontmatter, which overrides plugin settings:
 | Command | Description |
 |---|---|
 | Markdown Notebook: Run all cells | Execute every supported code block in the active note, top to bottom |
-| Markdown Notebook: Restart Python kernel | Kill and restart the kernel, clearing all variables |
-| Markdown Notebook: Interrupt Python kernel | Send SIGINT to a running cell |
+| Markdown Notebook: Restart all kernels | Kill and restart every language kernel, clearing all variables |
+| Markdown Notebook: Interrupt kernel | Send SIGINT to a running cell |
 
 ### Settings
 
 | Setting | Default | Description |
 |---|---|---|
+| Execution timeout | `30000` | Maximum execution time per cell (ms) |
 | Python path | `python3` | Path to the Python executable |
 | Node.js path | `node` | Path to the Node.js executable |
 | Shell path | `bash` | Path to the shell interpreter |
-| R path | `Rscript` | Path to the R executable |
-| Execution timeout | `30000` | Maximum execution time per cell (ms) |
-| Media folder | *(empty)* | Vault-relative folder for saved images (e.g. `attachments`). Empty = save next to the note. |
+| R path | `R` | Path to the R executable |
+| Default output format | `html` | Format used when no `format=` arg is set (`html` or `image`) |
+| Media folder | *(empty)* | Vault-relative folder for saved images. Empty = save next to the note. |
 | Markdown image links | off | Use `![](path)` instead of `![[file]]` for saved images |
 
 ## Output Block Format
@@ -155,13 +151,11 @@ Outputs are stored between HTML comment markers:
 <!-- /nb-output -->
 ```
 
-Optional attributes:
-
 | Attribute | Description |
 |---|---|
-| `hash` | SHA-256 digest (8 bytes) of the cell's language + source. Used for staleness detection. |
-| `format` | `html`, `markdown`, or `image`. Absent on legacy blocks means `html`. |
-| `id` | Cell identifier, if set. Used in image filenames and for future tooling. |
+| `hash` | SHA-256 digest (8 bytes) of the cell's language + source |
+| `format` | `html` or `image`. Absent means `html`. |
+| `id` | Cell identifier, if set. Used in image filenames. |
 
 Example markers:
 

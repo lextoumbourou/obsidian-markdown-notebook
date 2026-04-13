@@ -1,6 +1,5 @@
 import {
   renderChunksToHtml,
-  renderChunksToMarkdown,
   extractImageData,
   OutputChunk,
 } from '../src/output/MimeRenderer';
@@ -63,43 +62,6 @@ describe('renderChunksToHtml', () => {
     const html = renderChunksToHtml(chunks);
     expect(html).toContain('nb-stream-stdout');
     expect(html).toContain('nb-stream-stderr');
-  });
-});
-
-// ── renderChunksToMarkdown ────────────────────────────────────────────────────
-
-describe('renderChunksToMarkdown', () => {
-  it('returns empty string for no chunks', () => {
-    expect(renderChunksToMarkdown([])).toBe('');
-  });
-
-  it('prefers text/markdown rich output over stdout', () => {
-    const chunks: OutputChunk[] = [
-      { type: 'stream', stream: 'stdout', text: 'plain text\n' },
-      { type: 'rich', mime: 'text/markdown', data: '| a | b |\n|---|---|\n| 1 | 2 |' },
-    ];
-    expect(renderChunksToMarkdown(chunks)).toBe('| a | b |\n|---|---|\n| 1 | 2 |');
-  });
-
-  it('falls back to stdout when no text/markdown chunk', () => {
-    const chunks: OutputChunk[] = [
-      { type: 'stream', stream: 'stdout', text: 'hello\n' },
-    ];
-    expect(renderChunksToMarkdown(chunks)).toBe('hello');
-  });
-
-  it('includes error text in fallback', () => {
-    const chunks: OutputChunk[] = [
-      { type: 'error', text: 'Error: bad\n' },
-    ];
-    expect(renderChunksToMarkdown(chunks)).toBe('Error: bad');
-  });
-
-  it('trims trailing whitespace', () => {
-    const chunks: OutputChunk[] = [
-      { type: 'stream', stream: 'stdout', text: 'hello\n\n' },
-    ];
-    expect(renderChunksToMarkdown(chunks)).toBe('hello');
   });
 });
 

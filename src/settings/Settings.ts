@@ -4,6 +4,7 @@ export interface PluginSettings {
   shellPath: string;
   rPath: string;
   executionTimeout: number;
+  defaultFormat: "html" | "image";
   mediaPath: string;
   markdownImageLinks: boolean;
 }
@@ -14,6 +15,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   shellPath: "bash",
   rPath: "R",
   executionTimeout: 30000,
+  defaultFormat: "html",
   mediaPath: "",
   markdownImageLinks: false,
 };

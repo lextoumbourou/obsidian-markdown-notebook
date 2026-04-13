@@ -47,6 +47,20 @@ export class SettingsTab extends PluginSettingTab {
     containerEl.createEl("h3", { text: "Output" });
 
     new Setting(containerEl)
+      .setName("Default output format")
+      .setDesc("Format used when no format= arg is specified on a cell")
+      .addDropdown((drop) =>
+        drop
+          .addOption("html", "HTML")
+          .addOption("image", "Image")
+          .setValue(this.plugin.settings.defaultFormat)
+          .onChange(async (value) => {
+            this.plugin.settings.defaultFormat = value as "html" | "image";
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(containerEl)
       .setName("Media folder")
       .setDesc("Vault-relative folder for saved images (e.g. attachments). Empty = save next to the note.")
       .addText((text) =>

@@ -2,104 +2,90 @@
 
 Track implementation decisions, gotchas, and deviations from the plan as work progresses.
 
-## Status: Phase 1 + Phase 2 (partial) complete
+## Status: Phase 1 + Phase 2 complete
 
 ---
 
 ## What's Built
 
-### Phase 1 — complete
-
 | Component | File | Notes |
 |---|---|---|
-| Plugin entry | `src/main.ts` | Registers processors and commands |
-| Settings | `src/settings/Settings.ts`, `SettingsTab.ts` | pythonPath, executionTimeout |
+| Plugin entry | `src/main.ts` | Registers processors for all languages + commands |
+| Languages | `src/languages.ts` | `SUPPORTED_LANGUAGES`, `LANG_ALIASES`, `canonicalLang()` |
+| Settings | `src/settings/Settings.ts`, `SettingsTab.ts` | Per-language paths, timeout, defaultFormat, media, markdownLinks |
+| Frontmatter | `src/NotebookFrontmatter.ts` | Per-note defaults from `notebook:` YAML key |
 | Hash utility | `src/HashUtils.ts` | SHA-256 via Web Crypto, truncated to 8 bytes |
-| Output block I/O | `src/OutputBlock.ts` | find/write/clear `<!-- nb-output -->` blocks in raw file text |
+| Output block I/O | `src/OutputBlock.ts` | find/write/clear `<!-- nb-output -->` blocks; image save |
 | MIME rendering | `src/output/MimeRenderer.ts` | Chunks → HTML; live DOM appending |
+| HTML→Image | `src/output/HtmlToImage.ts` | html-to-image (SVG foreignObject) fallback for non-native images |
 | Python kernel | `src/kernels/SubprocessKernel.ts` | Persistent `python3 -i` REPL |
-| Run button | `src/RunButton.ts` | Code block processor, staleness check, execution flow |
-| Run All | `src/RunAll.ts` | Executes all `{run}` cells in document order |
-
-### Phase 2 — complete
-
-- **Pandas DataFrames** — `ast.parse`-based eval-last-expression, `_repr_html_()` dispatch
-- **Matplotlib plots** — `plt.show()` override, base64 PNG via `\x00NB_RICH\x00` sentinel
-- **Error tracebacks** — ANSI escape code stripping, red left-border styling
-- **Run All command** — sequential execution, reverse-order file writes
-- **Execution count** — `[N]` badge on run buttons; increments per execution, resets on kernel restart
-- **Output format option** — `{run output=html|markdown|image}` controls storage format
+| Node kernel | `src/kernels/NodeKernel.ts` | Persistent Node.js via `vm.createContext` + stdin JSON protocol |
+| Shell kernel | `src/kernels/ShellKernel.ts` | Per-execution `bash -c` |
+| R kernel | `src/kernels/RKernel.ts` | Persistent `R --slave` REPL |
+| Base kernel | `src/kernels/BaseKernel.ts` | Shared REPL infrastructure; `kernelEnv()`, `stripAnsi()` |
+| Run button | `src/RunButton.ts` | Code block processor; all supported blocks get run button |
+| Run All | `src/RunAll.ts` | Executes all supported cells in document order |
 
 ---
 
 ## Decisions Log
 
-### 2026-04-12 — Initial planning
+### 2026-04-12 — Output comment format
 
 - Chose `<!-- nb-output hash="..." -->` HTML comment delimiters over fenced `` ```nb-output `` blocks
-  - **Rationale:** HTML comments are invisible in Obsidian preview, Pelican, and standard HTML renderers. The output HTML renders correctly in all these contexts. Fenced blocks would show as ugly code blocks in non-Obsidian renderers.
-  - **Confirmed:** Obsidian preserves HTML comments in preview mode and they are accessible via the post-processor DOM API (requires `TreeWalker` with `NodeFilter.SHOW_COMMENT`).
-  - **Target renderers:** Obsidian preview, PDF export (via Obsidian or Pandoc), Pelican static site generator. GitHub rendering is explicitly NOT a goal.
+  - **Rationale:** HTML comments are invisible in Obsidian preview, Pelican, and standard HTML renderers. Fenced blocks would show as ugly code blocks in non-Obsidian renderers.
+  - **Target renderers:** Obsidian preview, PDF export, Pelican. GitHub rendering is explicitly NOT a goal.
 
 - Chose SHA-256 via Web Crypto API (`crypto.subtle.digest`) rather than a bundled hash library
 
-- Phase 1 uses direct subprocess execution (no Jupyter dependency). Rich outputs via `\x00NB_RICH\x00{json}` sentinel on stdout.
+### 2026-04-12 — No `{run}` gate
 
-### 2026-04-12 — Code fence syntax
+- All code blocks for supported languages get a run button — no `{run}` annotation needed
+- Cell args use `{key=value}` syntax directly: `{format=image id=chart}`
+- `getSectionInfo(el)` is called inside the click handler (not at render time) to avoid stale null returns during initial render
 
-- Changed from `run-python` to `python {run}` info-string annotation
-  - **Rationale:** `run-python` is not a recognised language in Obsidian's editor — no syntax highlighting in Live Preview. With `python {run}`, the language identifier is `python`, so Obsidian applies full Python highlighting.
-  - **Implementation:** `registerMarkdownCodeBlockProcessor('python', ...)` intercepts ALL python blocks; we check for `{run}` in the fence info string via `getSectionInfo` and fall through to Prism rendering for plain blocks.
-  - **Gotcha:** `getSectionInfo(el).lineStart` doesn't always point to the opening fence — Obsidian sometimes groups a preceding HTML block (nb-output) with the code block into one section. Fixed by scanning from `lineStart` to `lineEnd` for the first `` ```python `` line rather than assuming `lineStart` IS the fence.
+### 2026-04-12 — Output formats
 
-### 2026-04-12 — Python REPL blank line terminator
+- Two formats: `html` (default) and `image`
+- `format=markdown` was considered and removed — too narrow (only useful for `df.to_markdown()`)
+- `defaultFormat` plugin setting (`html` | `image`) sets the baseline; overridden by frontmatter then cell args
+- Precedence: **plugin settings** → **frontmatter** → **cell args**
+- `format=image` priority: native `image/png` chunk (matplotlib/R) → html-to-image fallback → save HTML
 
-- Multi-line try/finally blocks sent to `python -i` via stdin require a trailing blank line to signal end-of-block to the REPL. Without it the REPL waits for more input and the execution times out.
-- Fixed by adding `\n` after the closing line of `wrapCode`, making it `\n\n` total.
+### 2026-04-12 — Image rendering fallback
 
-### 2026-04-12 — Multi-line cell eval
+- When `format=image` is set but code produces no native `image/png` chunk, html-to-image converts the HTML output to PNG
+- Uses SVG `foreignObject` approach (html-to-image library) — browser handles CSS rendering including Obsidian CSS variables
+- html2canvas was tried first but failed: it re-implements CSS in JS and can't resolve CSS variables, producing blank images
+- Key gotcha: the container element passed to `toPng()` must NOT have `position:fixed` — the fixed positioning is cloned into the foreignObject and renders off-screen. Solution: wrap in a fixed off-screen parent, pass the inner container (no position style) to `toPng()`
 
-- Initial `eval()` → `exec()` fallback approach discards the return value of the last expression in multi-line cells (e.g., `import pandas as pd\ndf\n`).
-- Fixed using `ast.parse` in the `__nb_run__` setup function: splits the code into statements, execs all-but-last, then evals the final statement if it's an `ast.Expr` node and calls `__nb_display__` on the result.
+### 2026-04-12 — Multi-language architecture
 
-### 2026-04-12 — Error styling
+- `BaseKernel` abstract class handles the finish-sigil protocol, exec queue, stdout streaming, RICH_SIGIL parsing
+- `ShellKernel` doesn't extend `BaseKernel` — per-execution `bash -c` doesn't fit the persistent REPL model
+- `NodeKernel` uses `vm.createContext` + JSON stdin protocol instead of Node's interactive REPL (too unreliable for programmatic use)
+- `kernelEnv()` prepends `/usr/local/bin`, `/opt/homebrew/bin` etc. to PATH — Obsidian launched from the Dock doesn't inherit shell PATH
 
-- `var(--background-modifier-error)` in Obsidian is a solid red fill — too heavy for inline error output, text becomes invisible.
-- Used transparent background with a red left border and `var(--text-error)` colour instead.
+### 2026-04-12 — Python REPL
 
-### 2026-04-13 — Output format option
+- Multi-line try/finally blocks sent to `python -i` require a trailing blank line to signal end-of-block
+- `__nb_run__` uses `ast.parse` to split code: execs all-but-last statement, evals last expression if `ast.Expr`, calls `__nb_display__` on result
+- `__nb_display__` checks `_repr_html_`, `_repr_svg_`, `_repr_markdown_`, `_repr_png_` in priority order
+- `plt.show` is monkey-patched to capture figure as base64 PNG via `\x00NB_RICH\x00` protocol
 
-- `{run output=html}` (default): HTML stored in `<!-- nb-output -->` block
-- `{run output=markdown}`: raw markdown stored; Obsidian renders natively (good for `df.to_markdown()` tables)
-- `{run output=image}`: PNG saved as `NOTENAME-nb-HASH.png` alongside the note; `![[filename]]` stored in block; falls back to HTML if no image was produced
-- `format="..."` attribute added to `<!-- nb-output -->` marker; absent format treated as `"html"` for backwards compatibility
-- `saveImageToVault` uses `atob` + `Uint8Array` (not Node `Buffer`) for ArrayBuffer conversion — works in Electron renderer context
+### 2026-04-12 — Image file writes
 
-### 2026-04-13 — Execution count indicators
-
-- `SubprocessKernel.executionCount` public field, incremented in `finish()` after each successful execution, reset to `0` in `stop()`
-- `[N]` badge rendered as `<span class="nb-exec-count">` inside a flex `nb-run-button-wrap` div
-- Badge initialised from `kernel.executionCount` at render time, updated after each click
+- `saveImageToVault` uses `vault.adapter.exists()` (filesystem check) rather than `getAbstractFileByPath` (index check) — vault index can be stale, causing "File already exists" errors on re-run
+- Falls back to `vault.adapter.writeBinary()` if index is stale after exists check
 
 ### 2026-04-12 — Run All write order
 
-- Writing output blocks modifies the file and shifts line numbers for subsequent blocks.
-- Solution: execute all cells sequentially (collecting outputs), then write outputs in **reverse document order** so each write only shifts line numbers of blocks that have already been written.
+- Execute all cells sequentially (collecting outputs), then write in **reverse document order** so each write only shifts line numbers of already-written blocks
 
----
+### 2026-04-12 — Conflict detection
 
-## Resolved Spikes
-
-### Spike 1: Python subprocess + sentinel protocol ✅
-
-- Rich outputs emitted as `\x00NB_RICH\x00{"mime": "...", "data": "..."}` on stdout
-- `\x00` prefix ensures the marker won't appear in normal text output
-- JSON-encoding handles all escaping including embedded newlines in HTML
-
-### Spike 2: Editor position stability ✅
-
-- Using `app.vault.process(file, fn)` (Obsidian v1.4+ transactional API) instead of `editor.replaceRange()`
-- Operates on raw file text, not the editor DOM — no undo history disruption, works even when the file isn't open in an editor
+- `registerMarkdownCodeBlockProcessor` throws if another plugin has already claimed a language
+- Wrapped in try/catch; conflicting languages collected and shown in a persistent Notice with instructions to disable the conflicting plugin
 
 ---
 
@@ -108,17 +94,22 @@ Track implementation decisions, gotchas, and deviations from the plan as work pr
 ```
 src/
 ├── main.ts
+├── languages.ts
 ├── HashUtils.ts
 ├── OutputBlock.ts
+├── NotebookFrontmatter.ts
 ├── RunButton.ts
 ├── RunAll.ts
 ├── kernels/
-│   └── SubprocessKernel.ts
+│   ├── BaseKernel.ts
+│   ├── SubprocessKernel.ts
+│   ├── NodeKernel.ts
+│   ├── ShellKernel.ts
+│   └── RKernel.ts
 ├── output/
-│   └── MimeRenderer.ts
+│   ├── MimeRenderer.ts
+│   └── HtmlToImage.ts
 └── settings/
     ├── Settings.ts
     └── SettingsTab.ts
 ```
-
-Note: `CodeFenceParser.ts`, `ExecutionManager.ts`, and `OutputRenderer.ts` from the original plan were not needed — their roles were absorbed by `RunButton.ts`, `SubprocessKernel.ts`, and Obsidian's native HTML pass-through respectively.
