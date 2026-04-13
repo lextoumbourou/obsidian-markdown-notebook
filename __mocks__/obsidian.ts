@@ -17,7 +17,12 @@ export class TFolder {
   isRoot() { return false; }
 }
 
-export class App {}
+export class App {
+  metadataCache = {
+    getFileCache: jest.fn(() => null),
+  };
+  vault = new Vault();
+}
 export class Plugin {}
 export class PluginSettingTab {}
 export class Notice { constructor(_msg: string) {} }

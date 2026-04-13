@@ -10,6 +10,8 @@ import {
 import type { BaseKernel } from "./kernels/BaseKernel";
 import type { ShellKernel } from "./kernels/ShellKernel";
 import type { PluginSettings } from "./settings/Settings";
+import { canonicalLang } from "./languages";
+import { readNotebookFrontmatter, NotebookFrontmatter } from "./NotebookFrontmatter";
 
 type AnyKernel = BaseKernel | ShellKernel;
 
@@ -17,12 +19,13 @@ interface RunBlock {
   language: string;
   source: string;
   id: string | undefined;
-  output: string | undefined;
+  format: string | undefined;
   lineEnd: number;
 }
 
 /**
- * Parse all `{run}` blocks from raw file content, for any supported language.
+ * Parse all executable code blocks from raw file content.
+ * All fences for supported languages are included — no {run} marker needed.
  */
 export function parseRunBlocks(content: string): RunBlock[] {
   const lines = content.split("\n");
@@ -30,19 +33,21 @@ export function parseRunBlocks(content: string): RunBlock[] {
   let i = 0;
 
   while (i < lines.length) {
-    const fenceMatch = lines[i].match(/^```(\w+)\s*\{run([^}]*)\}/);
+    const fenceMatch = lines[i].match(/^```(\w+)(?:\s*\{([^}]*)\})?/);
     if (fenceMatch) {
-      const language = fenceMatch[1];
-      const args = fenceMatch[2];
-      const id = args.match(/id=(\S+)/)?.[1];
-      const output = args.match(/output=(\S+)/)?.[1];
-      const sourceLines: string[] = [];
-      i++;
-      while (i < lines.length && !lines[i].startsWith("```")) {
-        sourceLines.push(lines[i]);
+      const lang = canonicalLang(fenceMatch[1]);
+      if (lang) {
+        const args = fenceMatch[2] ?? "";
+        const id = args.match(/id=(\S+)/)?.[1];
+        const format = args.match(/format=(\S+)/)?.[1];
+        const sourceLines: string[] = [];
         i++;
+        while (i < lines.length && !lines[i].startsWith("```")) {
+          sourceLines.push(lines[i]);
+          i++;
+        }
+        blocks.push({ language: lang, source: sourceLines.join("\n"), id, format, lineEnd: i });
       }
-      blocks.push({ language, source: sourceLines.join("\n"), id, output, lineEnd: i });
     }
     i++;
   }
@@ -58,6 +63,7 @@ export async function runAll(
 ): Promise<void> {
   const content = await app.vault.read(file);
   const blocks = parseRunBlocks(content);
+  const fm = readNotebookFrontmatter(app, file);
 
   if (blocks.length === 0) {
     new Notice("No executable cells found.");
@@ -72,12 +78,13 @@ export async function runAll(
     const block = blocks[i];
     const hash = await hashCodeFence(block.language, block.source);
     const chunks: OutputChunk[] = [];
+    const timeout = fm.timeout ?? settings.executionTimeout;
 
     try {
       await getKernel(block.language).execute(
         block.source,
         (chunk) => chunks.push(chunk),
-        settings.executionTimeout
+        timeout
       );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -85,8 +92,7 @@ export async function runAll(
     }
 
     const { content: outContent, format } = await resolveOutput(
-      app, file, hash, chunks, block.id, block.output,
-      settings.mediaPath, settings.markdownImageLinks
+      app, file, hash, chunks, block.id, block.format, settings, fm
     );
     results.push({ ...block, hash, content: outContent, format });
   }
@@ -108,18 +114,22 @@ async function resolveOutput(
   hash: string,
   chunks: OutputChunk[],
   id: string | undefined,
-  outputArg: string | undefined,
-  mediaPath: string,
-  markdownImageLinks: boolean
+  formatArg: string | undefined,
+  settings: PluginSettings,
+  fm: NotebookFrontmatter,
 ): Promise<{ content: string; format: OutputFormat }> {
-  if (outputArg === "markdown") {
+  const outputFormat = formatArg ?? fm.format;
+  const mediaPath = fm.media ?? settings.mediaPath;
+  const markdownLinks = fm.markdownLinks ?? settings.markdownImageLinks;
+
+  if (outputFormat === "markdown") {
     return { content: renderChunksToMarkdown(chunks), format: "markdown" };
   }
-  if (outputArg === "image") {
+  if (outputFormat === "image") {
     const imgData = extractImageData(chunks);
     if (imgData) {
       const { filename, vaultPath } = await saveImageToVault(app, file, id, hash, imgData, mediaPath);
-      return { content: imageLink(filename, vaultPath, file, markdownImageLinks), format: "image" };
+      return { content: imageLink(filename, vaultPath, file, markdownLinks), format: "image" };
     }
   }
   return { content: renderChunksToHtml(chunks), format: "html" };

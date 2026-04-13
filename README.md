@@ -4,10 +4,10 @@ An experimental Obsidian plugin that brings a Jupyter-style notebook experience 
 
 ## How It Works
 
-Mark a Python code block as executable by adding `{run}` to the info string:
+All code blocks for supported languages are executable. Just write your code and click **▶ Run**:
 
 ````markdown
-```python {run}
+```python
 import pandas as pd
 
 df = pd.DataFrame({"name": ["Alice", "Bob"], "score": [92, 85]})
@@ -64,42 +64,42 @@ Optional but recommended for Python:
 
 ### Running cells
 
-Add `{run}` to any code block and click **▶ Run** in reading view. The `[N]` badge to the left of the button shows how many cells have executed since the kernel started.
+Click **▶ Run** on any supported language block in reading view. The `[N]` badge to the left of the button shows how many cells have executed since the kernel started.
 
 ### Output formats
 
-Control how the output is stored with the `output` argument:
+Control how the output is stored with the `format` argument:
 
 | Argument | Stored as | Best for |
 |---|---|---|
-| `output=html` | HTML in comment block (default) | DataFrames, rich objects |
-| `output=markdown` | Raw Markdown in comment block | Plain tables, text output |
-| `output=image` | PNG saved to vault, `![[...]]` link | Matplotlib plots |
+| `format=html` | HTML in comment block (default) | DataFrames, rich objects |
+| `format=markdown` | Raw Markdown in comment block | Plain tables, text output |
+| `format=image` | PNG saved to vault, `![[...]]` link | Matplotlib plots |
 
 Examples:
 
 ````markdown
-```python {run output=markdown}
+```python {format=markdown}
 df.to_markdown(index=False)
 ```
 ````
 
 ````markdown
-```python {run output=image}
+```python {format=image}
 import matplotlib.pyplot as plt
 plt.plot([1, 2, 3])
 plt.show()
 ```
 ````
 
-If `output=image` is requested but no image was generated, the output falls back to HTML automatically.
+If `format=image` is requested but no image was generated, the output falls back to HTML automatically.
 
 ### Cell IDs
 
 Assign a stable identifier to a cell with `id=`:
 
 ````markdown
-```python {run output=image id=revenue-chart}
+```python {format=image id=revenue-chart}
 ...
 plt.show()
 ```
@@ -107,11 +107,29 @@ plt.show()
 
 The ID is stored in the comment marker and used as the image filename (`revenue-chart.png`). Without an ID, images are named `notename-nb-<hash>.png`. IDs make image filenames stable across re-runs and easier to reference from other notes.
 
+### Document-level defaults (frontmatter)
+
+Set default args for all cells in a note via the `notebook:` key in frontmatter:
+
+```yaml
+---
+notebook:
+  format: html        # default output format (html | markdown | image)
+  media: attachments  # image save folder, relative to vault root
+  timeout: 60000      # execution timeout in ms
+  markdownLinks: true # use ![](path) instead of ![[file]] for images
+---
+```
+
+Cell-level args override frontmatter, which overrides plugin settings:
+
+> plugin settings → frontmatter → cell args
+
 ### Commands
 
 | Command | Description |
 |---|---|
-| Markdown Notebook: Run all cells | Execute every `{run}` cell in the active note, top to bottom |
+| Markdown Notebook: Run all cells | Execute every supported code block in the active note, top to bottom |
 | Markdown Notebook: Restart Python kernel | Kill and restart the kernel, clearing all variables |
 | Markdown Notebook: Interrupt Python kernel | Send SIGINT to a running cell |
 

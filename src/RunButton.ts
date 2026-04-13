@@ -20,28 +20,31 @@ import {
 } from "./output/MimeRenderer";
 import type { BaseKernel } from "./kernels/BaseKernel";
 import type { ShellKernel } from "./kernels/ShellKernel";
+import type { PluginSettings } from "./settings/Settings";
+import { readNotebookFrontmatter, NotebookFrontmatter } from "./NotebookFrontmatter";
 
 type AnyKernel = BaseKernel | ShellKernel;
 
 export interface RunButtonContext {
   app: App;
-  getSettings: () => import("./settings/Settings").PluginSettings;
+  getSettings: () => PluginSettings;
   getKernel: (lang: string) => AnyKernel;
 }
 
-/** Args parsed from the `{run key=value}` info-string annotation. */
+/** Args parsed from `{key=value}` pairs in the fence info string. */
 export interface RunArgs {
   id?: string;
-  output?: string;
+  format?: string;
   [key: string]: string | undefined;
 }
 
-function parseRunArgs(openingLine: string): RunArgs | null {
-  const match = openingLine.match(/\{run([^}]*)\}/);
-  if (!match) return null;
+function parseRunArgs(openingLine: string): RunArgs {
+  const match = openingLine.match(/\{([^}]*)\}/);
   const args: RunArgs = {};
-  for (const m of match[1].matchAll(/(\w+)=(\S+)/g)) {
-    args[m[1]] = m[2];
+  if (match) {
+    for (const m of match[1].matchAll(/(\w+)=(\S+)/g)) {
+      args[m[1]] = m[2];
+    }
   }
   return args;
 }
@@ -57,7 +60,7 @@ function renderPlainCodeBlock(src: string, el: HTMLElement, language: string): H
 
 /**
  * Registered via plugin.registerMarkdownCodeBlockProcessor(language, ...).
- * language is the canonical name (python, javascript, bash, r).
+ * All blocks for supported languages get a run button — no {run} marker needed.
  */
 export async function processCodeBlock(
   src: string,
@@ -68,32 +71,11 @@ export async function processCodeBlock(
 ): Promise<void> {
   const { app } = context;
 
-  const sectionInfo = ctx.getSectionInfo(el);
-  let runArgs: RunArgs | null = null;
-
-  if (sectionInfo) {
-    const lines = sectionInfo.text.split("\n");
-    for (let i = sectionInfo.lineStart; i <= sectionInfo.lineEnd; i++) {
-      const line = lines[i] ?? "";
-      if (line.startsWith("```")) {
-        runArgs = parseRunArgs(line);
-        break;
-      }
-    }
-  }
-
-  // Plain block — render with syntax highlighting and exit
-  if (!runArgs) {
-    renderPlainCodeBlock(src, el, language);
-    return;
-  }
-
   const settings = context.getSettings();
   const kernel = context.getKernel(language);
   const pre = renderPlainCodeBlock(src, el, language);
   const hash = await hashCodeFence(language, src);
 
-  // Run button + execution count badge
   const buttonWrap = pre.createDiv({ cls: "nb-run-button-wrap" });
   const countBadge = buttonWrap.createEl("span", {
     cls: "nb-exec-count",
@@ -109,18 +91,35 @@ export async function processCodeBlock(
     button.classList.add("nb-run-button--running");
     button.setText("● Running");
 
+    // Re-read section info at click time so args are never stale.
+    // getSectionInfo can return null during the initial render pass.
+    const sectionInfo = ctx.getSectionInfo(el);
+    let runArgs: RunArgs = {};
+    if (sectionInfo) {
+      const lines = sectionInfo.text.split("\n");
+      for (let i = sectionInfo.lineStart; i <= sectionInfo.lineEnd; i++) {
+        const line = lines[i] ?? "";
+        if (line.startsWith("```")) {
+          runArgs = parseRunArgs(line);
+          break;
+        }
+      }
+    }
+
     const liveEl = el.createDiv({ cls: "nb-live-output" });
     const chunks: OutputChunk[] = [];
 
+    const file = app.vault.getAbstractFileByPath(ctx.sourcePath);
+    const fm: NotebookFrontmatter = file instanceof TFile
+      ? readNotebookFrontmatter(app, file)
+      : {};
+    const timeout = fm.timeout ?? settings.executionTimeout;
+
     try {
-      await kernel.execute(
-        src,
-        (chunk) => {
-          chunks.push(chunk);
-          appendChunkToElement(liveEl, chunk);
-        },
-        settings.executionTimeout
-      );
+      await kernel.execute(src, (chunk) => {
+        chunks.push(chunk);
+        appendChunkToElement(liveEl, chunk);
+      }, timeout);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       chunks.push({ type: "error", text: msg });
@@ -128,17 +127,14 @@ export async function processCodeBlock(
       new Notice(`Notebook: ${msg}`);
     }
 
-    if (sectionInfo) {
-      const file = app.vault.getAbstractFileByPath(ctx.sourcePath);
-      if (file instanceof TFile) {
-        try {
-          const { content, format } = await buildOutput(
-            app, file, hash, chunks, runArgs!, settings.mediaPath, settings.markdownImageLinks
-          );
-          await writeOutputBlock(app, file, sectionInfo.lineEnd, hash, content, format, runArgs!.id);
-        } catch (err) {
-          console.error("[MarkdownNotebook] Failed to write output block:", err);
-        }
+    if (sectionInfo && file instanceof TFile) {
+      try {
+        const { content, format } = await buildOutput(
+          app, file, hash, chunks, runArgs, settings, fm
+        );
+        await writeOutputBlock(app, file, sectionInfo.lineEnd, hash, content, format, runArgs.id);
+      } catch (err) {
+        console.error("[MarkdownNotebook] Failed to write output block:", err);
       }
     }
 
@@ -155,19 +151,23 @@ async function buildOutput(
   hash: string,
   chunks: OutputChunk[],
   runArgs: RunArgs,
-  mediaPath: string,
-  markdownImageLinks: boolean
+  settings: PluginSettings,
+  fm: NotebookFrontmatter,
 ): Promise<{ content: string; format: OutputFormat }> {
-  if (runArgs.output === "markdown") {
+  const outputFormat = runArgs.format ?? fm.format;
+  const mediaPath = fm.media ?? settings.mediaPath;
+  const markdownLinks = fm.markdownLinks ?? settings.markdownImageLinks;
+
+  if (outputFormat === "markdown") {
     return { content: renderChunksToMarkdown(chunks), format: "markdown" };
   }
-  if (runArgs.output === "image") {
+  if (outputFormat === "image") {
     const imgData = extractImageData(chunks);
     if (imgData) {
       const { filename, vaultPath } = await saveImageToVault(
         app, file, runArgs.id, hash, imgData, mediaPath
       );
-      return { content: imageLink(filename, vaultPath, file, markdownImageLinks), format: "image" };
+      return { content: imageLink(filename, vaultPath, file, markdownLinks), format: "image" };
     }
   }
   return { content: renderChunksToHtml(chunks), format: "html" };

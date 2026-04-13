@@ -8,17 +8,9 @@ import { RKernel } from "./kernels/RKernel";
 import { BaseKernel } from "./kernels/BaseKernel";
 import { processCodeBlock, RunButtonContext } from "./RunButton";
 import { runAll } from "./RunAll";
+import { SUPPORTED_LANGUAGES, LANG_ALIASES } from "./languages";
 
 type AnyKernel = BaseKernel | ShellKernel;
-
-// Canonical language names; fence aliases are normalised to these.
-const LANG_ALIASES: Record<string, string> = {
-  js: "javascript",
-  sh: "bash",
-  shell: "bash",
-};
-
-const SUPPORTED_LANGUAGES = ["python", "javascript", "bash", "r"];
 
 export default class MarkdownNotebookPlugin extends Plugin {
   settings: PluginSettings;
@@ -36,12 +28,26 @@ export default class MarkdownNotebookPlugin extends Plugin {
 
     // Register a processor for each language + its common aliases
     const registered = new Set<string>();
+    const conflicts: string[] = [];
     for (const lang of [...SUPPORTED_LANGUAGES, ...Object.keys(LANG_ALIASES)]) {
       if (registered.has(lang)) continue;
       registered.add(lang);
       const canonical = LANG_ALIASES[lang] ?? lang;
-      this.registerMarkdownCodeBlockProcessor(lang, (src, el, ctx) =>
-        processCodeBlock(src, el, ctx, context, canonical)
+      try {
+        this.registerMarkdownCodeBlockProcessor(lang, (src, el, ctx) =>
+          processCodeBlock(src, el, ctx, context, canonical)
+        );
+      } catch {
+        conflicts.push(lang);
+      }
+    }
+    if (conflicts.length > 0) {
+      new Notice(
+        `Markdown Notebook: another plugin has already claimed the ` +
+        `"${conflicts.join('", "')}" code block processor(s). ` +
+        `Please disable any other code-execution plugins (e.g. Execute Code, Code Emitter) ` +
+        `and reload Obsidian.`,
+        0  // persist until dismissed
       );
     }
 
