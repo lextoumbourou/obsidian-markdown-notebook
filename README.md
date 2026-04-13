@@ -17,7 +17,7 @@ df
 ```
 ````
 
-The output is stored directly in the Markdown file as a comment block immediately below the cell:
+Outputs are stored directly in the Markdown file as a comment block immediately below the cell — either as HTML:
 
 ```html
 <!-- nb-output hash="a3f1b2c4d5e6f7a8" format="html" -->
@@ -27,7 +27,15 @@ The output is stored directly in the Markdown file as a comment block immediatel
 <!-- /nb-output -->
 ```
 
-Comment markers are invisible in all standard Markdown renderers. The content between them renders as HTML or as a saved image link.
+Or as a saved image link:
+
+```html
+<!-- nb-output hash="a3f1b2c4d5e6f7a8" format="image" -->
+![[my-note-nb-a3f1b2c4.png]]
+<!-- /nb-output -->
+```
+
+Comment markers are invisible in all standard Markdown renderers — including PDF export, GitHub, and Obsidian's reading view.
 
 ## Features
 
