@@ -2,6 +2,8 @@
 
 An experimental Obsidian plugin that brings a Jupyter-style notebook experience to plain Markdown files. Code cells execute directly in your notes, and their outputs — text, tables, plots — are stored in the file itself.
 
+![Obsidian Markdown Notebook](title-image.png)
+
 ## How It Works
 
 All code blocks for supported languages are executable. Just write your code and click **▶ Run**:
