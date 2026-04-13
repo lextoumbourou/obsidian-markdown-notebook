@@ -28,7 +28,7 @@ function renderChunk(chunk: OutputChunk): string {
 function renderRich(mime: string, data: string): string {
   switch (mime) {
     case "text/html":
-      return `<div class="nb-output-html">${data}</div>`;
+      return `<div class="nb-output-html">${collapseStyleTags(data)}</div>`;
     case "image/png":
       return `<img class="nb-output-image" src="data:image/png;base64,${data}" />`;
     case "image/svg+xml":
@@ -85,6 +85,13 @@ export function appendChunkToElement(el: HTMLElement, chunk: OutputChunk): void 
       break;
     }
   }
+}
+
+function collapseStyleTags(html: string): string {
+  return html.replace(
+    /<style\b[^>]*>([\s\S]*?)<\/style>/gi,
+    (_, content) => `<style>${content.replace(/\s+/g, " ").trim()}</style>`
+  );
 }
 
 function escapeHtml(text: string): string {
