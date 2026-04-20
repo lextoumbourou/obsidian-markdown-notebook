@@ -3,6 +3,7 @@ import {
   findOutputBlock,
   writeOutputBlock,
   imageLink,
+  saveImageToVault,
 } from '../src/OutputBlock';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -198,5 +199,47 @@ describe('imageLink', () => {
   it('handles note at vault root', () => {
     const file = makeFile('analysis', '');
     expect(imageLink('plot.png', 'attachments/plot.png', file, true)).toBe('![](attachments/plot.png)');
+  });
+});
+
+// ── saveImageToVault ──────────────────────────────────────────────────────────
+
+function makeAppMock() {
+  return {
+    vault: {
+      adapter: {
+        exists: jest.fn().mockResolvedValue(false),
+        writeBinary: jest.fn().mockResolvedValue(undefined),
+      },
+      createFolder: jest.fn().mockResolvedValue(undefined),
+      createBinary: jest.fn().mockResolvedValue(undefined),
+      modifyBinary: jest.fn().mockResolvedValue(undefined),
+      getAbstractFileByPath: jest.fn().mockReturnValue(null),
+    },
+  };
+}
+
+describe('saveImageToVault', () => {
+  const base64 = btoa('fake-png-data');
+
+  it('strips trailing slash from mediaPath', async () => {
+    const app = makeAppMock();
+    const file = makeFile('note', '');
+    const { vaultPath } = await saveImageToVault(app as never, file, 'chart', 'abc123', base64, 'attachments/');
+    expect(vaultPath).toBe('attachments/chart.png');
+  });
+
+  it('strips multiple trailing slashes', async () => {
+    const app = makeAppMock();
+    const file = makeFile('note', '');
+    const { vaultPath } = await saveImageToVault(app as never, file, 'chart', 'abc123', base64, 'attachments///');
+    expect(vaultPath).toBe('attachments/chart.png');
+  });
+
+  it('works correctly without a trailing slash', async () => {
+    const app = makeAppMock();
+    const file = makeFile('note', '');
+    const { vaultPath } = await saveImageToVault(app as never, file, 'chart', 'abc123', base64, 'attachments');
+    expect(vaultPath).toBe('attachments/chart.png');
   });
 });
