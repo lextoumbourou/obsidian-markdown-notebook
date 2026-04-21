@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.5] - 2026-04-21
+
+### Changed
+- Default image filenames now use just `{hash}.png` instead of `{notename}-nb-{hash}.png` when no `id=` arg is set
+
 ## [0.1.4] - 2026-04-21
 
 ### Fixed

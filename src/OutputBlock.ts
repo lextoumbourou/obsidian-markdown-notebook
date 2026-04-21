@@ -159,7 +159,7 @@ export async function saveImageToVault(
   base64: string,
   mediaPath: string
 ): Promise<{ filename: string; vaultPath: string }> {
-  const filename = id ? `${id}.png` : `${noteFile.basename}-nb-${hash}.png`;
+  const filename = id ? `${id}.png` : `${hash}.png`;
   const dir = (mediaPath.trim().replace(/\/+$/, "")) || noteFile.parent?.path || "";
   const vaultPath = dir ? `${dir}/${filename}` : filename;
 
