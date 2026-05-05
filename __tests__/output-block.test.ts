@@ -111,6 +111,30 @@ describe('findOutputBlock', () => {
     expect(block!.id).toBeUndefined();
   });
 
+  it('parses the status attribute', () => {
+    const lines = [
+      '```python',
+      '```',
+      '<!-- nb-output hash="abc12345" format="html" status="running" -->',
+      '',
+      '<!-- /nb-output -->',
+    ];
+    const block = findOutputBlock(lines, 1);
+    expect(block!.status).toBe('running');
+  });
+
+  it('leaves status undefined when attribute is absent', () => {
+    const lines = [
+      '```python',
+      '```',
+      '<!-- nb-output hash="abc12345" format="html" -->',
+      '<div>done</div>',
+      '<!-- /nb-output -->',
+    ];
+    const block = findOutputBlock(lines, 1);
+    expect(block!.status).toBeUndefined();
+  });
+
   it('handles multi-line content', () => {
     const lines = [
       '```python',
@@ -170,6 +194,26 @@ describe('writeOutputBlock', () => {
 
     expect(mock.content).toContain('id="my-plot"');
     expect(mock.content).toContain('format="image"');
+  });
+
+  it('includes status attribute in the marker when provided', async () => {
+    const initial = '```python\n```\n';
+    const mock = makeVaultMock(initial);
+    const file = makeFile('note', '');
+
+    await writeOutputBlock(mock as never, file, 1, 'abc12345', '', 'html', undefined, 'running');
+
+    expect(mock.content).toContain('status="running"');
+  });
+
+  it('omits status attribute when not provided', async () => {
+    const initial = '```python\n```\n';
+    const mock = makeVaultMock(initial);
+    const file = makeFile('note', '');
+
+    await writeOutputBlock(mock as never, file, 1, 'abc12345', '<div>done</div>', 'html');
+
+    expect(mock.content).not.toContain('status=');
   });
 });
 

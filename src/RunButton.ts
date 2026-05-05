@@ -25,6 +25,9 @@ import { readNotebookFrontmatter, NotebookFrontmatter } from "./NotebookFrontmat
 
 type AnyKernel = BaseKernel | ShellKernel;
 
+const RUNNING_HTML = `<div class="nb-status-running"><span class="nb-status-spinner"></span>Running...</div>`;
+const ERROR_HTML = `<div class="nb-status-error">Execution failed</div>`;
+
 export interface RunButtonContext {
   app: App;
   getSettings: () => PluginSettings;
@@ -115,12 +118,26 @@ export async function processCodeBlock(
       : {};
     const timeout = fm.timeout ?? settings.executionTimeout;
 
+    const pendingFormat = (runArgs.format ?? fm.format ?? settings.defaultFormat) as OutputFormat;
+
+    // Write a placeholder block immediately so the output anchor exists in the
+    // file while execution is running. Prevents accidental edits into the gap.
+    if (sectionInfo && file instanceof TFile) {
+      try {
+        await writeOutputBlock(app, file, sectionInfo.lineEnd, hash, RUNNING_HTML, pendingFormat, runArgs.id, "running");
+      } catch (err) {
+        console.error("[MarkdownNotebook] Failed to write placeholder block:", err);
+      }
+    }
+
+    let execError = false;
     try {
       await kernel.execute(src, (chunk) => {
         chunks.push(chunk);
         appendChunkToElement(liveEl, chunk);
       }, timeout);
     } catch (err) {
+      execError = true;
       const msg = err instanceof Error ? err.message : String(err);
       chunks.push({ type: "error", text: msg });
       appendChunkToElement(liveEl, { type: "error", text: msg });
@@ -128,13 +145,21 @@ export async function processCodeBlock(
     }
 
     if (sectionInfo && file instanceof TFile) {
-      try {
-        const { content, format } = await buildOutput(
-          app, file, hash, chunks, runArgs, settings, fm
-        );
-        await writeOutputBlock(app, file, sectionInfo.lineEnd, hash, content, format, runArgs.id);
-      } catch (err) {
-        console.error("[MarkdownNotebook] Failed to write output block:", err);
+      if (execError) {
+        try {
+          await writeOutputBlock(app, file, sectionInfo.lineEnd, hash, ERROR_HTML, pendingFormat, runArgs.id, "error");
+        } catch (err) {
+          console.error("[MarkdownNotebook] Failed to write error block:", err);
+        }
+      } else {
+        try {
+          const { content, format } = await buildOutput(
+            app, file, hash, chunks, runArgs, settings, fm
+          );
+          await writeOutputBlock(app, file, sectionInfo.lineEnd, hash, content, format, runArgs.id);
+        } catch (err) {
+          console.error("[MarkdownNotebook] Failed to write output block:", err);
+        }
       }
     }
 

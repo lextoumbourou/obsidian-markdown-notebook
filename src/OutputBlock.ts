@@ -1,12 +1,14 @@
 import { App, TFile } from "obsidian";
 
 export type OutputFormat = "html" | "image";
+export type OutputStatus = "running" | "error";
 
 export interface OutputBlock {
   id?: string;
   hash: string;
   content: string;
   format: OutputFormat;
+  status?: OutputStatus;
   lineStart: number; // line index of <!-- nb-output ... -->
   lineEnd: number;   // line index of <!-- /nb-output -->
 }
@@ -56,6 +58,7 @@ export function findOutputBlock(lines: string[], codeFenceEndLine: number): Outp
           hash: attrs.hash,
           content: lines.slice(i + 1, j).join("\n"),
           format: (attrs.format as OutputFormat | undefined) ?? "html",
+          status: (attrs.status as OutputStatus | undefined),
           lineStart,
           lineEnd: j,
         };
@@ -66,8 +69,8 @@ export function findOutputBlock(lines: string[], codeFenceEndLine: number): Outp
   return null;
 }
 
-function makeMarker(id: string | undefined, hash: string, format: OutputFormat): string {
-  const attrs = serializeAttrs({ id, hash, format });
+function makeMarker(id: string | undefined, hash: string, format: OutputFormat, status?: OutputStatus): string {
+  const attrs = serializeAttrs({ id, hash, format, status });
   return `<!-- nb-output ${attrs} -->`;
 }
 
@@ -77,11 +80,12 @@ function replaceBlock(
   id: string | undefined,
   hash: string,
   content: string,
-  format: OutputFormat
+  format: OutputFormat,
+  status?: OutputStatus
 ): string[] {
   return [
     ...lines.slice(0, block.lineStart),
-    makeMarker(id, hash, format),
+    makeMarker(id, hash, format, status),
     content,
     `<!-- /nb-output -->`,
     ...lines.slice(block.lineEnd + 1),
@@ -94,11 +98,12 @@ function insertBlock(
   id: string | undefined,
   hash: string,
   content: string,
-  format: OutputFormat
+  format: OutputFormat,
+  status?: OutputStatus
 ): string[] {
   return [
     ...lines.slice(0, codeFenceEndLine + 1),
-    makeMarker(id, hash, format),
+    makeMarker(id, hash, format, status),
     content,
     `<!-- /nb-output -->`,
     ...lines.slice(codeFenceEndLine + 1),
@@ -116,14 +121,15 @@ export async function writeOutputBlock(
   hash: string,
   content: string,
   format: OutputFormat = "html",
-  id?: string
+  id?: string,
+  status?: OutputStatus
 ): Promise<void> {
   await app.vault.process(file, (raw) => {
     const lines = raw.split("\n");
     const existing = findOutputBlock(lines, codeFenceEndLine);
     const updated = existing
-      ? replaceBlock(lines, existing, id, hash, content, format)
-      : insertBlock(lines, codeFenceEndLine, id, hash, content, format);
+      ? replaceBlock(lines, existing, id, hash, content, format, status)
+      : insertBlock(lines, codeFenceEndLine, id, hash, content, format, status);
     return updated.join("\n");
   });
 }
