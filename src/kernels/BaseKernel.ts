@@ -1,8 +1,19 @@
 import { ChildProcessWithoutNullStreams } from "child_process";
 import type { OutputChunk } from "../output/MimeRenderer";
 
-export const RICH_SIGIL = "\x00NB_RICH\x00";
+// \x01, not \x00: R string literals cannot contain nul bytes, and the sigil
+// must be expressible in every kernel's setup script.
+export const RICH_SIGIL = "\x01NB_RICH\x01";
 export const SETUP_DONE_SIGIL = "__NB_SETUP_DONE__";
+
+/** Thrown when a cell exceeds its execution timeout, so callers can
+ * distinguish a timeout from a genuine execution failure. */
+export class KernelTimeoutError extends Error {
+  constructor(public readonly timeoutMs: number) {
+    super(`Execution timed out after ${timeoutMs}ms`);
+    this.name = "KernelTimeoutError";
+  }
+}
 
 /**
  * Return a process env with common binary directories prepended to PATH.
@@ -34,10 +45,15 @@ export function kernelEnv(): Record<string, string | undefined> {
  * Subclasses may override stop() for additional cleanup (temp files, etc.),
  * but must call super.stop().
  */
+/** How long to wait for an interrupted cell to acknowledge (print its finish
+ * sigil) before giving up and killing the kernel process. */
+const DRAIN_TIMEOUT_MS = 5000;
+
 export abstract class BaseKernel {
   protected process: ChildProcessWithoutNullStreams | null = null;
   protected starting: Promise<void> | null = null;
   private execQueue: Promise<void> = Promise.resolve();
+  private pendingDrain: Promise<void> | null = null;
   executionCount = 0;
 
   protected abstract start(): Promise<void>;
@@ -56,10 +72,16 @@ export abstract class BaseKernel {
     onChunk: (chunk: OutputChunk) => void,
     timeoutMs: number
   ): Promise<void> {
-    this.execQueue = this.execQueue.then(() =>
+    const run = this.execQueue.then(() =>
       this.doExecute(code, onChunk, timeoutMs)
     );
-    return this.execQueue;
+    // The queue must survive a failed execution: keep chaining on a settled
+    // promise while the caller still observes the rejection via `run`.
+    this.execQueue = run.then(
+      () => undefined,
+      () => undefined
+    );
+    return run;
   }
 
   private async doExecute(
@@ -67,6 +89,9 @@ export abstract class BaseKernel {
     onChunk: (chunk: OutputChunk) => void,
     timeoutMs: number
   ): Promise<void> {
+    // A previous cell may have timed out and still be flushing output;
+    // wait for it to wind down so its output can't bleed into this run.
+    if (this.pendingDrain) await this.pendingDrain;
     await this.ensureStarted();
     if (!this.process) throw new Error("Kernel not running");
 
@@ -93,7 +118,14 @@ export abstract class BaseKernel {
         done = true;
         this.process?.stdout.removeListener("data", onStdout);
         this.process?.stderr.removeListener("data", onStderr);
-        reject(new Error(`Execution timed out after ${timeoutMs}ms`));
+        // Interrupt the runaway cell and discard its late output so it
+        // doesn't bleed into the next execution. If the interrupt doesn't
+        // take, the drain kills the kernel so the next run starts fresh.
+        this.interrupt();
+        this.pendingDrain = this.drainStale(finishSigil).finally(() => {
+          this.pendingDrain = null;
+        });
+        reject(new KernelTimeoutError(timeoutMs));
       }, timeoutMs);
 
       const onStdout = (data: Buffer) => {
@@ -125,7 +157,10 @@ export abstract class BaseKernel {
       };
 
       const emitText = (text: string) => {
+        // text ends with "\n" (or is a pre-sigil remainder); split produces a
+        // trailing empty element that must not become an extra newline.
         const lines = text.split("\n");
+        if (lines[lines.length - 1] === "") lines.pop();
         let plainBuf = "";
         for (const line of lines) {
           if (line.startsWith(RICH_SIGIL)) {
@@ -156,6 +191,48 @@ export abstract class BaseKernel {
 
   interrupt(): void {
     this.process?.kill("SIGINT");
+  }
+
+  /**
+   * Discard output from an interrupted cell until its finish sigil arrives.
+   * If the sigil never shows up within DRAIN_TIMEOUT_MS the cell ignored the
+   * interrupt — kill the kernel so the next execution starts on a clean one.
+   */
+  private drainStale(finishSigil: string): Promise<void> {
+    const proc = this.process;
+    if (!proc) return Promise.resolve();
+
+    return new Promise<void>((resolve) => {
+      let buf = "";
+      const cleanup = (sawSigil: boolean) => {
+        clearTimeout(timer);
+        proc.stdout.removeListener("data", onStdout);
+        proc.stderr.removeListener("data", onStderr);
+        proc.removeListener("close", onClose);
+        if (!sawSigil && this.process === proc) {
+          this.stop();
+        }
+        resolve();
+      };
+      const onStdout = (data: Buffer) => {
+        buf += data.toString();
+        if (buf.includes(finishSigil)) {
+          cleanup(true);
+          return;
+        }
+        // Keep only enough to match a sigil split across chunks
+        if (buf.length > finishSigil.length * 2) {
+          buf = buf.slice(-finishSigil.length);
+        }
+      };
+      const onStderr = () => {}; // discard the interrupt traceback
+      const onClose = () => cleanup(true); // dead kernel can't emit stale output
+      const timer = setTimeout(() => cleanup(false), DRAIN_TIMEOUT_MS);
+
+      proc.stdout.on("data", onStdout);
+      proc.stderr.on("data", onStderr);
+      proc.once("close", onClose);
+    });
   }
 
   stop(): void {

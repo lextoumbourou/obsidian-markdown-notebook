@@ -18,6 +18,7 @@ import {
   OutputChunk,
 } from "./output/MimeRenderer";
 import { renderHtmlToPng } from "./output/HtmlToImage";
+import { KernelTimeoutError } from "./kernels/BaseKernel";
 import type { BaseKernel } from "./kernels/BaseKernel";
 import type { ShellKernel } from "./kernels/ShellKernel";
 import type { PluginSettings } from "./settings/Settings";
@@ -27,6 +28,11 @@ type AnyKernel = BaseKernel | ShellKernel;
 
 const RUNNING_HTML = `<div class="nb-status-running"><span class="nb-status-spinner"></span>Running...</div>`;
 const ERROR_HTML = `<div class="nb-status-error">Execution failed</div>`;
+
+function timeoutHtml(timeoutMs: number): string {
+  const secs = timeoutMs / 1000;
+  return `<div class="nb-status-timeout">Execution timed out after ${secs}s</div>`;
+}
 
 export interface RunButtonContext {
   app: App;
@@ -120,24 +126,28 @@ export async function processCodeBlock(
 
     const pendingFormat = (runArgs.format ?? fm.format ?? settings.defaultFormat) as OutputFormat;
 
+    // Identify the cell by content, not position — line numbers go stale as
+    // soon as any other cell's write inserts lines above this one.
+    const cell = { language, source: src, hintLine: sectionInfo?.lineEnd ?? 0 };
+
     // Write a placeholder block immediately so the output anchor exists in the
     // file while execution is running. Prevents accidental edits into the gap.
     if (sectionInfo && file instanceof TFile) {
       try {
-        await writeOutputBlock(app, file, sectionInfo.lineEnd, hash, RUNNING_HTML, pendingFormat, runArgs.id, "running");
+        await writeOutputBlock(app, file, cell, hash, RUNNING_HTML, pendingFormat, runArgs.id, "running");
       } catch (err) {
         console.error("[MarkdownNotebook] Failed to write placeholder block:", err);
       }
     }
 
-    let execError = false;
+    let failure: "error" | "timeout" | null = null;
     try {
       await kernel.execute(src, (chunk) => {
         chunks.push(chunk);
         appendChunkToElement(liveEl, chunk);
       }, timeout);
     } catch (err) {
-      execError = true;
+      failure = err instanceof KernelTimeoutError ? "timeout" : "error";
       const msg = err instanceof Error ? err.message : String(err);
       chunks.push({ type: "error", text: msg });
       appendChunkToElement(liveEl, { type: "error", text: msg });
@@ -145,9 +155,10 @@ export async function processCodeBlock(
     }
 
     if (sectionInfo && file instanceof TFile) {
-      if (execError) {
+      if (failure) {
+        const statusHtml = failure === "timeout" ? timeoutHtml(timeout) : ERROR_HTML;
         try {
-          await writeOutputBlock(app, file, sectionInfo.lineEnd, hash, ERROR_HTML, pendingFormat, runArgs.id, "error");
+          await writeOutputBlock(app, file, cell, hash, statusHtml, pendingFormat, runArgs.id, failure);
         } catch (err) {
           console.error("[MarkdownNotebook] Failed to write error block:", err);
         }
@@ -156,7 +167,7 @@ export async function processCodeBlock(
           const { content, format } = await buildOutput(
             app, file, hash, chunks, runArgs, settings, fm
           );
-          await writeOutputBlock(app, file, sectionInfo.lineEnd, hash, content, format, runArgs.id);
+          await writeOutputBlock(app, file, cell, hash, content, format, runArgs.id);
         } catch (err) {
           console.error("[MarkdownNotebook] Failed to write output block:", err);
         }

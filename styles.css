@@ -154,6 +154,16 @@
   content: "✕ ";
 }
 
+.nb-status-timeout {
+  font-size: var(--font-smaller);
+  color: var(--color-orange);
+  padding: 4px 0;
+}
+
+.nb-status-timeout::before {
+  content: "⏱ ";
+}
+
 /* Live streaming output (shown during execution) */
 .nb-live-output {
   border-left: 3px solid var(--color-yellow);

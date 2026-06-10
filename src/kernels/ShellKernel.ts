@@ -1,5 +1,5 @@
 import { ChildProcessWithoutNullStreams, spawn } from "child_process";
-import { stripAnsi, kernelEnv } from "./BaseKernel";
+import { stripAnsi, kernelEnv, KernelTimeoutError } from "./BaseKernel";
 import type { OutputChunk } from "../output/MimeRenderer";
 
 /**
@@ -26,10 +26,16 @@ export class ShellKernel {
     onChunk: (chunk: OutputChunk) => void,
     timeoutMs: number
   ): Promise<void> {
-    this.execQueue = this.execQueue.then(() =>
+    const run = this.execQueue.then(() =>
       this.doExecute(code, onChunk, timeoutMs)
     );
-    return this.execQueue;
+    // The queue must survive a failed execution: keep chaining on a settled
+    // promise while the caller still observes the rejection via `run`.
+    this.execQueue = run.then(
+      () => undefined,
+      () => undefined
+    );
+    return run;
   }
 
   private doExecute(
@@ -43,7 +49,7 @@ export class ShellKernel {
 
       const timer = setTimeout(() => {
         proc.kill();
-        reject(new Error(`Execution timed out after ${timeoutMs}ms`));
+        reject(new KernelTimeoutError(timeoutMs));
       }, timeoutMs);
 
       proc.stdout.on("data", (data: Buffer) => {

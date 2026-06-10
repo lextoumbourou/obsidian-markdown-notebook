@@ -153,12 +153,14 @@ describe('findOutputBlock', () => {
 // ── writeOutputBlock ──────────────────────────────────────────────────────────
 
 describe('writeOutputBlock', () => {
+  const pyCell = (source: string, hintLine = 0) => ({ language: 'python', source, hintLine });
+
   it('inserts a new block after the code fence end line', async () => {
     const initial = '```python\nx = 1\n```\n\nsome other text';
     const mock = makeVaultMock(initial);
     const file = makeFile('note', '');
 
-    await writeOutputBlock(mock as never, file, 2, 'abc12345', '<div>out</div>', 'html');
+    await writeOutputBlock(mock as never, file, pyCell('x = 1', 2), 'abc12345', '<div>out</div>', 'html');
 
     expect(mock.content).toContain('<!-- nb-output hash="abc12345" format="html" -->');
     expect(mock.content).toContain('<div>out</div>');
@@ -177,7 +179,7 @@ describe('writeOutputBlock', () => {
     const mock = makeVaultMock(initial);
     const file = makeFile('note', '');
 
-    await writeOutputBlock(mock as never, file, 2, 'new11111', '<div>new</div>', 'html');
+    await writeOutputBlock(mock as never, file, pyCell('x = 1', 2), 'new11111', '<div>new</div>', 'html');
 
     expect(mock.content).not.toContain('old00000');
     expect(mock.content).not.toContain('<div>old</div>');
@@ -190,7 +192,7 @@ describe('writeOutputBlock', () => {
     const mock = makeVaultMock(initial);
     const file = makeFile('note', '');
 
-    await writeOutputBlock(mock as never, file, 1, 'abc12345', '![[plot.png]]', 'image', 'my-plot');
+    await writeOutputBlock(mock as never, file, pyCell('', 1), 'abc12345', '![[plot.png]]', 'image', 'my-plot');
 
     expect(mock.content).toContain('id="my-plot"');
     expect(mock.content).toContain('format="image"');
@@ -201,7 +203,7 @@ describe('writeOutputBlock', () => {
     const mock = makeVaultMock(initial);
     const file = makeFile('note', '');
 
-    await writeOutputBlock(mock as never, file, 1, 'abc12345', '', 'html', undefined, 'running');
+    await writeOutputBlock(mock as never, file, pyCell('', 1), 'abc12345', '', 'html', undefined, 'running');
 
     expect(mock.content).toContain('status="running"');
   });
@@ -211,9 +213,81 @@ describe('writeOutputBlock', () => {
     const mock = makeVaultMock(initial);
     const file = makeFile('note', '');
 
-    await writeOutputBlock(mock as never, file, 1, 'abc12345', '<div>done</div>', 'html');
+    await writeOutputBlock(mock as never, file, pyCell('', 1), 'abc12345', '<div>done</div>', 'html');
 
     expect(mock.content).not.toContain('status=');
+  });
+
+  it('re-anchors when lines shifted after the position was captured', async () => {
+    // Two cells; cell B's position was captured before cell A's output
+    // (3 lines) was inserted above it — its hintLine is stale by 3.
+    const initial = [
+      '```python',          // 0
+      'print("a")',         // 1
+      '```',                // 2
+      '<!-- nb-output hash="aaa" format="html" -->', // 3  (cell A just wrote this)
+      '<div>a</div>',       // 4
+      '<!-- /nb-output -->',// 5
+      '',                   // 6
+      '```python',          // 7
+      'print("b")',         // 8
+      '```',                // 9   <- cell B's real fence end (captured as 6, pre-shift)
+    ].join('\n');
+    const mock = makeVaultMock(initial);
+    const file = makeFile('note', '');
+
+    await writeOutputBlock(mock as never, file, pyCell('print("b")', 6), 'bbb', '<div>b</div>', 'html');
+
+    const lines = mock.content.split('\n');
+    // Cell A's block is untouched, and B's block sits directly under B's fence
+    expect(lines[3]).toContain('hash="aaa"');
+    expect(lines[4]).toBe('<div>a</div>');
+    expect(lines[10]).toContain('hash="bbb"');
+    expect(lines[11]).toBe('<div>b</div>');
+  });
+
+  it('matches fences by alias (js fence, javascript cell)', async () => {
+    const initial = '```js\nconsole.log(1)\n```';
+    const mock = makeVaultMock(initial);
+    const file = makeFile('note', '');
+
+    await writeOutputBlock(
+      mock as never, file,
+      { language: 'javascript', source: 'console.log(1)', hintLine: 2 },
+      'abc', '<div>1</div>', 'html'
+    );
+
+    expect(mock.content).toContain('hash="abc"');
+  });
+
+  it('drops the write when the cell no longer exists in the file', async () => {
+    const initial = '```python\nprint("edited away")\n```';
+    const mock = makeVaultMock(initial);
+    const file = makeFile('note', '');
+
+    await writeOutputBlock(mock as never, file, pyCell('print("original")', 2), 'abc', '<div>x</div>', 'html');
+
+    expect(mock.content).toBe(initial);
+  });
+
+  it('disambiguates identical cells by nearest hint line', async () => {
+    const initial = [
+      '```python',  // 0
+      'x',          // 1
+      '```',        // 2
+      '',
+      '```python',  // 4
+      'x',          // 5
+      '```',        // 6
+    ].join('\n');
+    const mock = makeVaultMock(initial);
+    const file = makeFile('note', '');
+
+    await writeOutputBlock(mock as never, file, pyCell('x', 6), 'second', '<div>2nd</div>', 'html');
+
+    const lines = mock.content.split('\n');
+    expect(lines[7]).toContain('hash="second"');
+    expect(lines[3]).toBe('');
   });
 });
 

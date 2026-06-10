@@ -117,7 +117,9 @@ finally:
   }
 
   protected filterStderr(text: string): string {
-    return stripAnsi(text).replace(/^(>>>|\.\.\.) ?/gm, "").trimEnd();
+    // python -i echoes one >>>/... prompt per line of the wrapped code, all
+    // buffered onto the start of the first real stderr line — strip runs.
+    return stripAnsi(text).replace(/^((?:>>>|\.\.\.) ?)+/gm, "").trimEnd();
   }
 
   stop(): void {

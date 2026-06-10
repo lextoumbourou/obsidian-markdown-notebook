@@ -1,7 +1,51 @@
 import { App, TFile } from "obsidian";
+import { canonicalLang } from "./languages";
 
 export type OutputFormat = "html" | "image";
-export type OutputStatus = "running" | "error";
+export type OutputStatus = "running" | "error" | "timeout";
+
+/**
+ * Identifies a cell by content rather than position. Line numbers captured at
+ * click/render time go stale the moment an earlier cell's write inserts or
+ * removes lines, so every write re-anchors by language + source at write time,
+ * using the captured line only to disambiguate identical cells.
+ */
+export interface CellLocator {
+  /** Canonical language of the cell (the fence itself may use an alias). */
+  language: string;
+  /** Exact source of the cell as passed to the code block processor. */
+  source: string;
+  /** Closing-fence line when the cell was last seen — duplicate tie-breaker. */
+  hintLine: number;
+}
+
+/**
+ * Find the closing-fence line index of the cell in the current file content.
+ * Returns null if no fence matches the cell's language + source anymore
+ * (the cell was edited or deleted while its execution was in flight).
+ */
+export function findCellFenceEnd(lines: string[], cell: CellLocator): number | null {
+  const target = cell.source.replace(/\n$/, "");
+  const matches: number[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    const m = lines[i].match(/^```(\w+)/);
+    if (m && canonicalLang(m[1]) === cell.language) {
+      const body: string[] = [];
+      i++;
+      while (i < lines.length && !lines[i].startsWith("```")) {
+        body.push(lines[i]);
+        i++;
+      }
+      if (body.join("\n").replace(/\n$/, "") === target) matches.push(i);
+    }
+    i++;
+  }
+  if (matches.length === 0) return null;
+  return matches.reduce((best, cur) =>
+    Math.abs(cur - cell.hintLine) < Math.abs(best - cell.hintLine) ? cur : best
+  );
+}
 
 export interface OutputBlock {
   id?: string;
@@ -112,12 +156,15 @@ function insertBlock(
 
 /**
  * Write (insert or replace) an nb-output block in the file on disk.
- * Uses vault.process for a safe transactional read-modify-write.
+ * Uses vault.process for a safe transactional read-modify-write, and
+ * re-locates the cell's fence at write time so concurrent cell runs can't
+ * write into each other's regions. If the cell no longer exists in the file,
+ * the write is dropped.
  */
 export async function writeOutputBlock(
   app: App,
   file: TFile,
-  codeFenceEndLine: number,
+  cell: CellLocator,
   hash: string,
   content: string,
   format: OutputFormat = "html",
@@ -126,10 +173,12 @@ export async function writeOutputBlock(
 ): Promise<void> {
   await app.vault.process(file, (raw) => {
     const lines = raw.split("\n");
-    const existing = findOutputBlock(lines, codeFenceEndLine);
+    const fenceEnd = findCellFenceEnd(lines, cell);
+    if (fenceEnd === null) return raw;
+    const existing = findOutputBlock(lines, fenceEnd);
     const updated = existing
       ? replaceBlock(lines, existing, id, hash, content, format, status)
-      : insertBlock(lines, codeFenceEndLine, id, hash, content, format, status);
+      : insertBlock(lines, fenceEnd, id, hash, content, format, status);
     return updated.join("\n");
   });
 }
@@ -140,11 +189,13 @@ export async function writeOutputBlock(
 export async function clearOutputBlock(
   app: App,
   file: TFile,
-  codeFenceEndLine: number
+  cell: CellLocator
 ): Promise<void> {
   await app.vault.process(file, (raw) => {
     const lines = raw.split("\n");
-    const block = findOutputBlock(lines, codeFenceEndLine);
+    const fenceEnd = findCellFenceEnd(lines, cell);
+    if (fenceEnd === null) return raw;
+    const block = findOutputBlock(lines, fenceEnd);
     if (!block) return raw;
     return [
       ...lines.slice(0, block.lineStart),
@@ -166,7 +217,9 @@ export async function saveImageToVault(
   mediaPath: string
 ): Promise<{ filename: string; vaultPath: string }> {
   const filename = id ? `${id}.png` : `${hash}.png`;
-  const dir = (mediaPath.trim().replace(/\/+$/, "")) || noteFile.parent?.path || "";
+  const dir = normalizeDir(
+    (mediaPath.trim().replace(/\/+$/, "")) || noteFile.parent?.path || ""
+  );
   const vaultPath = dir ? `${dir}/${filename}` : filename;
 
   const binaryStr = atob(base64);
@@ -206,8 +259,13 @@ export function imageLink(
   useMarkdown: boolean
 ): string {
   if (!useMarkdown) return `![[${filename}]]`;
-  const noteDir = noteFile.parent?.path ?? "";
+  const noteDir = normalizeDir(noteFile.parent?.path ?? "");
   return `![](${relativeVaultPath(noteDir, vaultPath)})`;
+}
+
+/** Obsidian reports the vault root folder's path as "/" — treat it as "". */
+function normalizeDir(dir: string): string {
+  return dir === "/" ? "" : dir;
 }
 
 /** Compute a path to `targetVaultPath` relative to `fromDir` (both vault-relative). */

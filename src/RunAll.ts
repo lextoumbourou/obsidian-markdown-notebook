@@ -97,10 +97,13 @@ export async function runAll(
     results.push({ ...block, hash, content: outContent, format });
   }
 
-  // Write outputs in reverse order so earlier blocks' line numbers stay valid
+  // Writes re-anchor each cell by content; lineEnd is only the duplicate
+  // tie-breaker hint. Reverse order keeps the hints closest to accurate.
   for (const result of [...results].reverse()) {
     await writeOutputBlock(
-      app, file, result.lineEnd, result.hash, result.content, result.format, result.id
+      app, file,
+      { language: result.language, source: result.source, hintLine: result.lineEnd },
+      result.hash, result.content, result.format, result.id
     );
   }
 

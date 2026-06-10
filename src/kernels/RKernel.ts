@@ -17,38 +17,55 @@ import { BaseKernel, RICH_SIGIL, SETUP_DONE_SIGIL, stripAnsi, kernelEnv } from "
 const SETUP_SCRIPT = `
 .nb_rich <- ${JSON.stringify(RICH_SIGIL)}
 
+# Proper JSON via jsonlite so quotes/newlines in data are escaped — the
+# payload stays on one line and the TS side JSON.parses it back.
 .nb_show_rich <- function(mime, data) {
-  cat(.nb_rich, '{"mime":', paste0('"', mime, '"'), ',"data":', paste0('"', data, '"'), '}\\n', sep='')
+  payload <- jsonlite::toJSON(list(mime = mime, data = data), auto_unbox = TRUE)
+  cat(.nb_rich, payload, '\\n', sep = '')
 }
 
 .nb_display <- function(x) {
-  if (is.null(x) || identical(x, invisible(NULL))) return(invisible(NULL))
-  # Data frame / tibble: try HTML table
+  if (is.null(x)) return(invisible(NULL))
+  # Data frame / tibble: try HTML table (requires knitr + jsonlite)
   if (is.data.frame(x)) {
-    tryCatch({
-      html <- paste(knitr::kable(x, format='html', table.attr='class="nb-table"'), collapse='\\n')
-      .nb_show_rich('text/html', jsonlite::base64_enc(chartr('\\n', ' ', html)))
-      return(invisible(NULL))
-    }, error = function(e) {})
+    ok <- tryCatch({
+      html <- paste(knitr::kable(x, format = 'html', table.attr = 'class="nb-table"'), collapse = '\\n')
+      .nb_show_rich('text/html', html)
+      TRUE
+    }, error = function(e) FALSE)
+    if (ok) return(invisible(NULL))
   }
   print(x)
   invisible(NULL)
 }
 
-# Capture plots: override the default display device after each cell
-# (Requires grDevices, base64enc, jsonlite — silently skipped otherwise)
-.nb_capture_plot <- function() {
+# Plot capture: in a headless session R opens the default device (Rplots.pdf)
+# on first plot. Route it to a PNG tempfile instead via options(device);
+# .nb_flush_plot() emits and closes it after each cell.
+# (Requires base64enc + jsonlite — degrades to no plot output otherwise)
+.nb_plot_file <- NULL
+.nb_plot_dev <- NULL
+options(device = function(...) {
+  .nb_plot_file <<- tempfile(fileext = '.png')
+  grDevices::png(.nb_plot_file, width = 800, height = 500, res = 96)
+  .nb_plot_dev <<- grDevices::dev.cur()
+})
+
+.nb_flush_plot <- function() {
   tryCatch({
-    tmp <- tempfile(fileext = '.png')
-    dev.copy(png, filename = tmp, width = 800, height = 500)
-    dev.off()
-    data <- base64enc::base64encode(tmp)
-    file.remove(tmp)
-    .nb_show_rich('image/png', data)
+    if (!is.null(.nb_plot_dev) && .nb_plot_dev %in% grDevices::dev.list()) {
+      grDevices::dev.off(.nb_plot_dev)
+      if (file.exists(.nb_plot_file) && file.size(.nb_plot_file) > 0) {
+        .nb_show_rich('image/png', base64enc::base64encode(.nb_plot_file))
+      }
+      file.remove(.nb_plot_file)
+    }
   }, error = function(e) {})
+  .nb_plot_file <<- NULL
+  .nb_plot_dev <<- NULL
 }
 
-cat(${JSON.stringify(SETUP_DONE_SIGIL)}, '\\n', sep='')
+cat(${JSON.stringify(SETUP_DONE_SIGIL)}, '\\n', sep = '')
 `;
 
 export class RKernel extends BaseKernel {
@@ -100,6 +117,7 @@ tryCatch(
   ),
   error = function(e) cat(paste0("Error: ", conditionMessage(e), "\\n"), file = stderr())
 )
+.nb_flush_plot()
 cat(${JSON.stringify(finishSigil)}, sep='')
 `;
   }
