@@ -1,0 +1,9 @@
+# Obsidian writes per-user state into .obsidian — keep only what makes the
+# vault work out of the box (enabled plugin list + symlinked plugin files).
+.obsidian/*
+!.obsidian/community-plugins.json
+!.obsidian/plugins
+
+# The plugin symlinks are named main.js, which the repo root .gitignore
+# excludes — re-include them here.
+!**/main.js
