@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.2.0] - 2026-06-10
 
 ### Added
 - Distinct timeout state for cells: a timed-out cell now writes a `status="timeout"` output block with an "Execution timed out after Ns" message, styled separately from execution errors
