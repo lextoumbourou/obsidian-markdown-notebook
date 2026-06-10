@@ -28,7 +28,7 @@ interface RunBlock {
  * All fences for supported languages are included — no {run} marker needed.
  */
 export function parseRunBlocks(content: string): RunBlock[] {
-  const lines = content.split("\n");
+  const lines = content.split(/\r?\n/);
   const blocks: RunBlock[] = [];
   let i = 0;
 

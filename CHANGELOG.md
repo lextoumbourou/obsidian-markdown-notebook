@@ -16,6 +16,13 @@
 - Python stderr output is no longer prefixed with runs of `>>> `/`... ` interactive-prompt echoes
 - Removed the stray blank line appended to every stdout output block
 - Markdown image links from notes at the vault root no longer get a spurious `../../` prefix (Obsidian reports the root folder's path as `/`)
+- Stale "Running..." spinner blocks are repaired: if the post-run write fails the block degrades to an error state instead of spinning forever, and blocks left behind by a crash or plugin reload mid-execution are converted to "Execution was interrupted" when the note is next opened
+- CRLF files no longer accumulate duplicate output blocks: line splitting handles `\r\n`, writes preserve the file's existing line endings, and content hashes are line-ending-normalized
+- Kernel startup failures are recoverable: a failed start tears down the half-started process and retries on the next run instead of caching the rejection; startup listeners and timers no longer leak
+- Output callbacks no longer fire after a shell cell has timed out
+
+### Changed
+- README: corrected the documented default image filename (`<hash>.png` since 0.1.5), documented the `status` output attribute, and noted that image filenames are not namespaced per note
 
 ## [0.1.6] - 2026-04-21
 

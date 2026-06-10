@@ -6,8 +6,9 @@ import { NodeKernel } from "./kernels/NodeKernel";
 import { ShellKernel } from "./kernels/ShellKernel";
 import { RKernel } from "./kernels/RKernel";
 import { BaseKernel } from "./kernels/BaseKernel";
-import { processCodeBlock, RunButtonContext } from "./RunButton";
+import { processCodeBlock, RunButtonContext, isCellInFlight } from "./RunButton";
 import { runAll } from "./RunAll";
+import { clearStaleRunningBlocks } from "./OutputBlock";
 import { SUPPORTED_LANGUAGES, LANG_ALIASES } from "./languages";
 
 type AnyKernel = BaseKernel | ShellKernel;
@@ -50,6 +51,20 @@ export default class MarkdownNotebookPlugin extends Plugin {
         0  // persist until dismissed
       );
     }
+
+    // A `status="running"` spinner block survives in the file if Obsidian
+    // quit (or the plugin reloaded) mid-execution — repair it on file open.
+    this.registerEvent(
+      this.app.workspace.on("file-open", (file) => {
+        if (file instanceof TFile && file.extension === "md") {
+          clearStaleRunningBlocks(this.app, file, (hash) =>
+            isCellInFlight(file.path, hash)
+          ).catch((err) =>
+            console.error("[MarkdownNotebook] Stale block cleanup failed:", err)
+          );
+        }
+      })
+    );
 
     this.addCommand({
       id: "restart-kernel",

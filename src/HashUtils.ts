@@ -4,7 +4,8 @@
  * collision-resistant enough for a single file.
  */
 export async function hashCodeFence(language: string, source: string): Promise<string> {
-  const text = `${language}\n${source}`;
+  // Normalize line endings so CRLF files hash identically to LF
+  const text = `${language}\n${source.replace(/\r\n/g, "\n")}`;
   const encoded = new TextEncoder().encode(text);
   const buffer = await crypto.subtle.digest("SHA-256", encoded);
   const bytes = new Uint8Array(buffer);

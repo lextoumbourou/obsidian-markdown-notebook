@@ -46,17 +46,20 @@ export class ShellKernel {
     return new Promise<void>((resolve, reject) => {
       const proc = spawn(this.shellPath, ["-c", code], { env: kernelEnv() });
       this.current = proc;
+      let settled = false;
 
       const timer = setTimeout(() => {
+        settled = true;
         proc.kill();
         reject(new KernelTimeoutError(timeoutMs));
       }, timeoutMs);
 
       proc.stdout.on("data", (data: Buffer) => {
-        onChunk({ type: "stream", stream: "stdout", text: data.toString() });
+        if (!settled) onChunk({ type: "stream", stream: "stdout", text: data.toString() });
       });
 
       proc.stderr.on("data", (data: Buffer) => {
+        if (settled) return;
         const text = stripAnsi(data.toString()).trimEnd();
         if (text) onChunk({ type: "error", text: text + "\n" });
       });
@@ -64,6 +67,8 @@ export class ShellKernel {
       proc.on("close", () => {
         clearTimeout(timer);
         this.current = null;
+        if (settled) return;
+        settled = true;
         this.executionCount++;
         resolve();
       });
@@ -71,6 +76,8 @@ export class ShellKernel {
       proc.on("error", (err) => {
         clearTimeout(timer);
         this.current = null;
+        if (settled) return;
+        settled = true;
         reject(err);
       });
     });

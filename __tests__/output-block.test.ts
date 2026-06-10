@@ -2,6 +2,7 @@ import { TFile, TFolder } from 'obsidian';
 import {
   findOutputBlock,
   writeOutputBlock,
+  clearStaleRunningBlocks,
   imageLink,
   saveImageToVault,
 } from '../src/OutputBlock';
@@ -270,6 +271,27 @@ describe('writeOutputBlock', () => {
     expect(mock.content).toBe(initial);
   });
 
+  it('handles CRLF files: replaces the block and preserves CRLF endings', async () => {
+    const initial = [
+      '```python',
+      'x = 1',
+      '```',
+      '<!-- nb-output hash="old00000" format="html" -->',
+      '<div>old</div>',
+      '<!-- /nb-output -->',
+    ].join('\r\n');
+    const mock = makeVaultMock(initial);
+    const file = makeFile('note', '');
+
+    await writeOutputBlock(mock as never, file, pyCell('x = 1', 2), 'new11111', '<div>new</div>', 'html');
+
+    expect(mock.content).not.toContain('old00000');
+    expect(mock.content).toContain('new11111');
+    expect(mock.content).toContain('\r\n');
+    // No duplicate block appended — exactly one start marker
+    expect(mock.content.match(/<!-- nb-output /g)).toHaveLength(1);
+  });
+
   it('disambiguates identical cells by nearest hint line', async () => {
     const initial = [
       '```python',  // 0
@@ -288,6 +310,54 @@ describe('writeOutputBlock', () => {
     const lines = mock.content.split('\n');
     expect(lines[7]).toContain('hash="second"');
     expect(lines[3]).toBe('');
+  });
+});
+
+// ── clearStaleRunningBlocks ───────────────────────────────────────────────────
+
+describe('clearStaleRunningBlocks', () => {
+  const running = (hash: string) => [
+    `<!-- nb-output hash="${hash}" format="html" status="running" -->`,
+    '<div class="nb-status-running">Running...</div>',
+    '<!-- /nb-output -->',
+  ];
+
+  it('replaces a stale running block with an interrupted error block', async () => {
+    const initial = ['```python', 'x', '```', ...running('stale123')].join('\n');
+    const mock = makeVaultMock(initial);
+    const file = makeFile('note', '');
+
+    await clearStaleRunningBlocks(mock as never, file, () => false);
+
+    expect(mock.content).toContain('status="error"');
+    expect(mock.content).toContain('Execution was interrupted');
+    expect(mock.content).not.toContain('status="running"');
+    expect(mock.content).toContain('hash="stale123"');
+  });
+
+  it('leaves a running block alone while its cell is in flight', async () => {
+    const initial = ['```python', 'x', '```', ...running('live456')].join('\n');
+    const mock = makeVaultMock(initial);
+    const file = makeFile('note', '');
+
+    await clearStaleRunningBlocks(mock as never, file, (hash) => hash === 'live456');
+
+    expect(mock.content).toBe(initial);
+  });
+
+  it('does not touch completed output blocks', async () => {
+    const initial = [
+      '```python', 'x', '```',
+      '<!-- nb-output hash="done789" format="html" -->',
+      '<div>done</div>',
+      '<!-- /nb-output -->',
+    ].join('\n');
+    const mock = makeVaultMock(initial);
+    const file = makeFile('note', '');
+
+    await clearStaleRunningBlocks(mock as never, file, () => false);
+
+    expect(mock.content).toBe(initial);
   });
 });
 

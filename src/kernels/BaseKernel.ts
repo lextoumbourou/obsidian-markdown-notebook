@@ -62,8 +62,14 @@ export abstract class BaseKernel {
 
   async ensureStarted(): Promise<void> {
     if (this.process) return;
-    if (this.starting) return this.starting;
-    this.starting = this.start();
+    if (!this.starting) {
+      // On failure, tear down any half-started process and clear `starting`
+      // so the next execution retries instead of reusing the rejection.
+      this.starting = this.start().catch((err) => {
+        this.stop();
+        throw err;
+      });
+    }
     return this.starting;
   }
 
@@ -247,17 +253,34 @@ export abstract class BaseKernel {
   /** Helper: wait for a sigil string to appear on the process stdout. */
   protected waitForSigil(sigil: string, timeoutMs = 15000): Promise<void> {
     return new Promise<void>((resolve, reject) => {
+      const proc = this.process;
+      if (!proc) {
+        reject(new Error("Kernel not running"));
+        return;
+      }
       let buf = "";
+      const cleanup = () => {
+        clearTimeout(timer);
+        proc.stdout.removeListener("data", onData);
+        proc.removeListener("error", onError);
+      };
       const onData = (data: Buffer) => {
         buf += data.toString();
         if (buf.includes(sigil)) {
-          this.process?.stdout.removeListener("data", onData);
+          cleanup();
           resolve();
         }
       };
-      this.process!.stdout.on("data", onData);
-      this.process!.once("error", reject);
-      setTimeout(() => reject(new Error("Kernel startup timed out")), timeoutMs);
+      const onError = (err: Error) => {
+        cleanup();
+        reject(err);
+      };
+      const timer = setTimeout(() => {
+        cleanup();
+        reject(new Error("Kernel startup timed out"));
+      }, timeoutMs);
+      proc.stdout.on("data", onData);
+      proc.once("error", onError);
     });
   }
 }

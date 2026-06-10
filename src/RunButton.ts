@@ -29,6 +29,14 @@ type AnyKernel = BaseKernel | ShellKernel;
 const RUNNING_HTML = `<div class="nb-status-running"><span class="nb-status-spinner"></span>Running...</div>`;
 const ERROR_HTML = `<div class="nb-status-error">Execution failed</div>`;
 
+/** Cells currently executing, keyed by `${sourcePath}::${hash}`. Lets the
+ * stale-block cleanup distinguish a live spinner from a crash leftover. */
+const inFlight = new Set<string>();
+
+export function isCellInFlight(sourcePath: string, hash: string): boolean {
+  return inFlight.has(`${sourcePath}::${hash}`);
+}
+
 function timeoutHtml(timeoutMs: number): string {
   const secs = timeoutMs / 1000;
   return `<div class="nb-status-timeout">Execution timed out after ${secs}s</div>`;
@@ -100,84 +108,97 @@ export async function processCodeBlock(
     button.classList.add("nb-run-button--running");
     button.setText("● Running");
 
-    // Re-read section info at click time so args are never stale.
-    // getSectionInfo can return null during the initial render pass.
-    const sectionInfo = ctx.getSectionInfo(el);
-    let runArgs: RunArgs = {};
-    if (sectionInfo) {
-      const lines = sectionInfo.text.split("\n");
-      for (let i = sectionInfo.lineStart; i <= sectionInfo.lineEnd; i++) {
-        const line = lines[i] ?? "";
-        if (line.startsWith("```")) {
-          runArgs = parseRunArgs(line);
-          break;
-        }
-      }
-    }
-
-    const liveEl = el.createDiv({ cls: "nb-live-output" });
-    const chunks: OutputChunk[] = [];
-
-    const file = app.vault.getAbstractFileByPath(ctx.sourcePath);
-    const fm: NotebookFrontmatter = file instanceof TFile
-      ? readNotebookFrontmatter(app, file)
-      : {};
-    const timeout = fm.timeout ?? settings.executionTimeout;
-
-    const pendingFormat = (runArgs.format ?? fm.format ?? settings.defaultFormat) as OutputFormat;
-
-    // Identify the cell by content, not position — line numbers go stale as
-    // soon as any other cell's write inserts lines above this one.
-    const cell = { language, source: src, hintLine: sectionInfo?.lineEnd ?? 0 };
-
-    // Write a placeholder block immediately so the output anchor exists in the
-    // file while execution is running. Prevents accidental edits into the gap.
-    if (sectionInfo && file instanceof TFile) {
-      try {
-        await writeOutputBlock(app, file, cell, hash, RUNNING_HTML, pendingFormat, runArgs.id, "running");
-      } catch (err) {
-        console.error("[MarkdownNotebook] Failed to write placeholder block:", err);
-      }
-    }
-
-    let failure: "error" | "timeout" | null = null;
+    const flightKey = `${ctx.sourcePath}::${hash}`;
+    inFlight.add(flightKey);
     try {
-      await kernel.execute(src, (chunk) => {
-        chunks.push(chunk);
-        appendChunkToElement(liveEl, chunk);
-      }, timeout);
-    } catch (err) {
-      failure = err instanceof KernelTimeoutError ? "timeout" : "error";
-      const msg = err instanceof Error ? err.message : String(err);
-      chunks.push({ type: "error", text: msg });
-      appendChunkToElement(liveEl, { type: "error", text: msg });
-      new Notice(`Notebook: ${msg}`);
-    }
-
-    if (sectionInfo && file instanceof TFile) {
-      if (failure) {
-        const statusHtml = failure === "timeout" ? timeoutHtml(timeout) : ERROR_HTML;
-        try {
-          await writeOutputBlock(app, file, cell, hash, statusHtml, pendingFormat, runArgs.id, failure);
-        } catch (err) {
-          console.error("[MarkdownNotebook] Failed to write error block:", err);
-        }
-      } else {
-        try {
-          const { content, format } = await buildOutput(
-            app, file, hash, chunks, runArgs, settings, fm
-          );
-          await writeOutputBlock(app, file, cell, hash, content, format, runArgs.id);
-        } catch (err) {
-          console.error("[MarkdownNotebook] Failed to write output block:", err);
+      // Re-read section info at click time so args are never stale.
+      // getSectionInfo can return null during the initial render pass.
+      const sectionInfo = ctx.getSectionInfo(el);
+      let runArgs: RunArgs = {};
+      if (sectionInfo) {
+        const lines = sectionInfo.text.split("\n");
+        for (let i = sectionInfo.lineStart; i <= sectionInfo.lineEnd; i++) {
+          const line = lines[i] ?? "";
+          if (line.startsWith("```")) {
+            runArgs = parseRunArgs(line);
+            break;
+          }
         }
       }
-    }
 
-    liveEl.remove();
-    button.classList.remove("nb-run-button--running");
-    button.setText("▶ Run");
-    countBadge.textContent = `[${context.getKernel(language).executionCount}]`;
+      const liveEl = el.createDiv({ cls: "nb-live-output" });
+      const chunks: OutputChunk[] = [];
+
+      const file = app.vault.getAbstractFileByPath(ctx.sourcePath);
+      const fm: NotebookFrontmatter = file instanceof TFile
+        ? readNotebookFrontmatter(app, file)
+        : {};
+      const timeout = fm.timeout ?? settings.executionTimeout;
+
+      const pendingFormat = (runArgs.format ?? fm.format ?? settings.defaultFormat) as OutputFormat;
+
+      // Identify the cell by content, not position — line numbers go stale as
+      // soon as any other cell's write inserts lines above this one.
+      const cell = { language, source: src, hintLine: sectionInfo?.lineEnd ?? 0 };
+
+      // Write a placeholder block immediately so the output anchor exists in the
+      // file while execution is running. Prevents accidental edits into the gap.
+      if (sectionInfo && file instanceof TFile) {
+        try {
+          await writeOutputBlock(app, file, cell, hash, RUNNING_HTML, pendingFormat, runArgs.id, "running");
+        } catch (err) {
+          console.error("[MarkdownNotebook] Failed to write placeholder block:", err);
+        }
+      }
+
+      let failure: "error" | "timeout" | null = null;
+      try {
+        await kernel.execute(src, (chunk) => {
+          chunks.push(chunk);
+          appendChunkToElement(liveEl, chunk);
+        }, timeout);
+      } catch (err) {
+        failure = err instanceof KernelTimeoutError ? "timeout" : "error";
+        const msg = err instanceof Error ? err.message : String(err);
+        chunks.push({ type: "error", text: msg });
+        appendChunkToElement(liveEl, { type: "error", text: msg });
+        new Notice(`Notebook: ${msg}`);
+      }
+
+      if (sectionInfo && file instanceof TFile) {
+        if (failure) {
+          const statusHtml = failure === "timeout" ? timeoutHtml(timeout) : ERROR_HTML;
+          try {
+            await writeOutputBlock(app, file, cell, hash, statusHtml, pendingFormat, runArgs.id, failure);
+          } catch (err) {
+            console.error("[MarkdownNotebook] Failed to write error block:", err);
+          }
+        } else {
+          try {
+            const { content, format } = await buildOutput(
+              app, file, hash, chunks, runArgs, settings, fm
+            );
+            await writeOutputBlock(app, file, cell, hash, content, format, runArgs.id);
+          } catch (err) {
+            console.error("[MarkdownNotebook] Failed to write output block:", err);
+            // Never leave the "running" placeholder behind — degrade to an
+            // error block so the file doesn't show a spinner forever.
+            try {
+              await writeOutputBlock(app, file, cell, hash, ERROR_HTML, pendingFormat, runArgs.id, "error");
+            } catch {
+              // file write is failing entirely; nothing more we can do
+            }
+          }
+        }
+      }
+
+      liveEl.remove();
+    } finally {
+      inFlight.delete(flightKey);
+      button.classList.remove("nb-run-button--running");
+      button.setText("▶ Run");
+      countBadge.textContent = `[${context.getKernel(language).executionCount}]`;
+    }
   });
 }
 

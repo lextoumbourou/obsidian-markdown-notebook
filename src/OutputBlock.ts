@@ -20,12 +20,22 @@ export interface CellLocator {
 }
 
 /**
+ * Split file content into lines, preserving knowledge of the line ending so
+ * the file can be re-joined without converting CRLF files to LF (and so the
+ * marker regexes, which anchor on `$`, aren't defeated by trailing `\r`).
+ */
+function splitFileLines(raw: string): { lines: string[]; eol: string } {
+  const eol = raw.includes("\r\n") ? "\r\n" : "\n";
+  return { lines: raw.split(/\r?\n/), eol };
+}
+
+/**
  * Find the closing-fence line index of the cell in the current file content.
  * Returns null if no fence matches the cell's language + source anymore
  * (the cell was edited or deleted while its execution was in flight).
  */
 export function findCellFenceEnd(lines: string[], cell: CellLocator): number | null {
-  const target = cell.source.replace(/\n$/, "");
+  const target = cell.source.replace(/\r\n/g, "\n").replace(/\n$/, "");
   const matches: number[] = [];
   let i = 0;
   while (i < lines.length) {
@@ -172,14 +182,14 @@ export async function writeOutputBlock(
   status?: OutputStatus
 ): Promise<void> {
   await app.vault.process(file, (raw) => {
-    const lines = raw.split("\n");
+    const { lines, eol } = splitFileLines(raw);
     const fenceEnd = findCellFenceEnd(lines, cell);
     if (fenceEnd === null) return raw;
     const existing = findOutputBlock(lines, fenceEnd);
     const updated = existing
       ? replaceBlock(lines, existing, id, hash, content, format, status)
       : insertBlock(lines, fenceEnd, id, hash, content, format, status);
-    return updated.join("\n");
+    return updated.join(eol);
   });
 }
 
@@ -192,7 +202,7 @@ export async function clearOutputBlock(
   cell: CellLocator
 ): Promise<void> {
   await app.vault.process(file, (raw) => {
-    const lines = raw.split("\n");
+    const { lines, eol } = splitFileLines(raw);
     const fenceEnd = findCellFenceEnd(lines, cell);
     if (fenceEnd === null) return raw;
     const block = findOutputBlock(lines, fenceEnd);
@@ -200,7 +210,46 @@ export async function clearOutputBlock(
     return [
       ...lines.slice(0, block.lineStart),
       ...lines.slice(block.lineEnd + 1),
-    ].join("\n");
+    ].join(eol);
+  });
+}
+
+const INTERRUPTED_HTML = `<div class="nb-status-error">Execution was interrupted</div>`;
+
+/**
+ * Replace stale `status="running"` blocks with an interrupted-error state.
+ * A spinner block survives in the file when Obsidian quits (or the plugin
+ * reloads) mid-execution. Any running block whose cell is not currently
+ * executing is stale by definition.
+ */
+export async function clearStaleRunningBlocks(
+  app: App,
+  file: TFile,
+  isInFlight: (hash: string) => boolean
+): Promise<void> {
+  await app.vault.process(file, (raw) => {
+    if (!raw.includes('status="running"')) return raw;
+    const { lines, eol } = splitFileLines(raw);
+    const out: string[] = [];
+    for (let i = 0; i < lines.length; i++) {
+      const m = lines[i].match(NB_OUTPUT_RE);
+      const attrs = m ? parseAttrs(m[1]) : null;
+      if (attrs?.hash && attrs.status === "running" && !isInFlight(attrs.hash)) {
+        let j = i + 1;
+        while (j < lines.length && !NB_OUTPUT_END.test(lines[j])) j++;
+        if (j < lines.length) {
+          out.push(
+            makeMarker(attrs.id, attrs.hash, (attrs.format as OutputFormat | undefined) ?? "html", "error"),
+            INTERRUPTED_HTML,
+            `<!-- /nb-output -->`
+          );
+          i = j;
+          continue;
+        }
+      }
+      out.push(lines[i]);
+    }
+    return out.join(eol);
   });
 }
 

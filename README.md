@@ -31,7 +31,7 @@ Or as a saved image link:
 
 ```html
 <!-- nb-output hash="a3f1b2c4d5e6f7a8" format="image" -->
-![[my-note-nb-a3f1b2c4.png]]
+![[a3f1b2c4d5e6f7a8.png]]
 <!-- /nb-output -->
 ```
 
@@ -110,7 +110,7 @@ plt.show()
 ```
 ````
 
-The ID is used as the image filename (`revenue-chart.png`). Without an ID, images are named `notename-nb-<hash>.png`. IDs make filenames stable across re-runs and easier to reference from other notes.
+The ID is used as the image filename (`revenue-chart.png`). Without an ID, images are named `<hash>.png` after the cell's content hash. IDs make filenames stable across re-runs and easier to reference from other notes — but note that filenames are not namespaced by note, so two notes sharing a media folder should use distinct IDs.
 
 ### Document-level defaults (frontmatter)
 
@@ -166,6 +166,7 @@ Outputs are stored between HTML comment markers:
 | `hash` | SHA-256 digest (8 bytes) of the cell's language + source |
 | `format` | `html` or `image`. Absent means `html`. |
 | `id` | Cell identifier, if set. Used in image filenames. |
+| `status` | `running`, `error`, or `timeout` for in-progress/failed cells. Absent for successful output. |
 
 Example markers:
 
