@@ -1,5 +1,27 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- Distinct timeout state for cells: a timed-out cell now writes a `status="timeout"` output block with an "Execution timed out after Ns" message, styled separately from execution errors
+- Example vault (`example-vault/`) for manual smoke testing: openable directly in Obsidian with the plugin symlinked to the repo build output, one annotated test note per language plus notes for timeouts and frontmatter defaults; reset between runs with `git checkout -- example-vault && git clean -fd example-vault`
+
+### Fixed
+- A single failed execution (timeout or bad interpreter path) no longer permanently poisons a kernel's execution queue — previously every subsequent run of that language failed instantly with the stale error until kernels were restarted
+- Timed-out cells are now interrupted (SIGINT) instead of left running, and their late output is discarded rather than leaking into the next execution's output; a kernel that ignores the interrupt for 5s is killed and restarted automatically on the next run
+- R kernel could never start: the rich-output sentinel contained a nul byte, which R string literals reject (`nul character not allowed`) — the sentinel is now `\x01`-based across all kernels
+- R data frames now render as HTML tables: rich payloads are serialized with `jsonlite::toJSON` instead of hand-rolled JSON, removing the base64 encoding that the renderer never decoded
+- R plots now work headless: new plots are routed to a PNG temp file via `options(device)` and emitted after each cell — previously the capture helper was never invoked and base R `plot()` silently wrote `Rplots.pdf` into Obsidian's working directory
+- Running multiple cells concurrently no longer corrupts the note: output writes re-anchor to the cell's fence by language + source at write time, instead of trusting line numbers captured at click time (which go stale as soon as an earlier cell inserts its output, splicing blocks into other cells' fences and replacing the wrong outputs)
+- Python stderr output is no longer prefixed with runs of `>>> `/`... ` interactive-prompt echoes
+- Removed the stray blank line appended to every stdout output block
+- Markdown image links from notes at the vault root no longer get a spurious `../../` prefix (Obsidian reports the root folder's path as `/`)
+
+## [0.1.6] - 2026-04-21
+
+### Added
+- Loading state placeholder: a spinner block (`status="running"`) is written to the file while a cell is executing
+
 ## [0.1.5] - 2026-04-21
 
 ### Changed
