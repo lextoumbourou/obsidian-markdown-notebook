@@ -28,7 +28,6 @@ print("python recovered")
 <!-- nb-output hash="a7606af622be120f" format="html" -->
 <div class="nb-output">
 <pre class="nb-stream-stdout">python recovered
-
 </pre>
 </div>
 <!-- /nb-output -->
@@ -76,7 +75,6 @@ cat("r recovered\n")
 <!-- nb-output hash="f2eea077f46e1cf4" format="html" -->
 <div class="nb-output">
 <pre class="nb-stream-stdout">r recovered
-
 </pre>
 </div>
 <!-- /nb-output -->
@@ -100,7 +98,6 @@ console.log("js recovered");
 <!-- nb-output hash="ef51bd7b49c44430" format="html" -->
 <div class="nb-output">
 <pre class="nb-stream-stdout">js recovered
-
 </pre>
 </div>
 <!-- /nb-output -->

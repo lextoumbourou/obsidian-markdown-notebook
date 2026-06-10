@@ -10,7 +10,6 @@ console.log("hello from node");
 <!-- nb-output hash="c9b03e3b073fc0d8" format="html" -->
 <div class="nb-output">
 <pre class="nb-stream-stdout">hello from node
-
 </pre>
 </div>
 <!-- /nb-output -->
@@ -27,7 +26,6 @@ obj
   &quot;a&quot;: 1,
   &quot;b&quot;: 2
 }
-
 </pre>
 </div>
 <!-- /nb-output -->
@@ -49,7 +47,6 @@ total + 2
 <!-- nb-output hash="6d6417395f206c3a" format="html" -->
 <div class="nb-output">
 <pre class="nb-stream-stdout">42
-
 </pre>
 </div>
 <!-- /nb-output -->
@@ -62,7 +59,6 @@ console.log("alias works");
 <!-- nb-output hash="8da54a3bcceb529d" format="html" -->
 <div class="nb-output">
 <pre class="nb-stream-stdout">alias works
-
 </pre>
 </div>
 <!-- /nb-output -->
@@ -82,7 +78,7 @@ TypeError: Cannot read properties of null (reading 'someProperty')
     at evalmachine.&lt;anonymous&gt;:1:6
     at Script.runInContext (node:vm:149:12)
     at Object.runInContext (node:vm:301:6)
-    at Socket.&lt;anonymous&gt; (/private/var/folders/m9/jlntzhk17ms42d1rwzzkrmzm0000gn/T/nb_node_1781070344195.js:34:25)
+    at Socket.&lt;anonymous&gt; (/private/var/folders/m9/jlntzhk17ms42d1rwzzkrmzm0000gn/T/nb_node_1781070994717.js:34:25)
     at Socket.emit (node:events:508:28)
     at addChunk (node:internal/streams/readable:559:12)
     at readableAddChunkPushByteMode (node:internal/streams/readable:510:3)
@@ -100,7 +96,6 @@ total + 2
 <!-- nb-output hash="6d6417395f206c3a" format="html" -->
 <div class="nb-output">
 <pre class="nb-stream-stdout">42
-
 </pre>
 </div>
 <!-- /nb-output -->
@@ -113,7 +108,6 @@ process.version
 <!-- nb-output hash="2ec3e9c850584db8" format="html" -->
 <div class="nb-output">
 <pre class="nb-stream-stdout">v24.12.0
-
 </pre>
 </div>
 <!-- /nb-output -->

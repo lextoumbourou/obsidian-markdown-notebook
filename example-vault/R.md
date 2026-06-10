@@ -1,3 +1,8 @@
+---
+notebook:
+  markdownLinks: true
+---
+
 # R
 
 Persistent R subprocess. Requires `knitr`, `jsonlite`, and `base64enc` for rich output; degrades to plain text without them.
@@ -68,13 +73,13 @@ plot(1:10, main = "r plot")
 </div>
 <!-- /nb-output -->
 
-## 5. Plot saved to vault — expect `![[r-plot.png]]` and the file next to this note
+## 5. Plot saved to vault — expect `![](r-plot.png)` and the file next to this note
 
 ```r {format=image id=r-plot}
 plot(cos, -pi, pi)
 ```
 <!-- nb-output id="r-plot" hash="64405d1a79d5dcea" format="image" -->
-![[r-plot.png]]
+![](r-plot.png)
 <!-- /nb-output -->
 
 ## 6. Message — expect `heads up from R` in red (R messages go to stderr)

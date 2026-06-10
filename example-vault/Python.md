@@ -1,3 +1,8 @@
+---
+notebook:
+  markdownLinks: true
+---
+
 # Python
 
 Persistent Python 3 subprocess. Variables survive between cells; the `[N]` badge increments per execution and resets on kernel restart.
@@ -13,7 +18,6 @@ print("hello from python")
 <!-- nb-output hash="bed4d09ec721dcae" format="html" -->
 <div class="nb-output">
 <pre class="nb-stream-stdout">hello from python
-
 </pre>
 </div>
 <!-- /nb-output -->
@@ -26,7 +30,6 @@ print("hello from python")
 <!-- nb-output hash="ebb31320a5f08a8a" format="html" -->
 <div class="nb-output">
 <pre class="nb-stream-stdout">4
-
 </pre>
 </div>
 <!-- /nb-output -->
@@ -48,7 +51,6 @@ counter + 1
 <!-- nb-output hash="044f02660b24c96a" format="html" -->
 <div class="nb-output">
 <pre class="nb-stream-stdout">42
-
 </pre>
 </div>
 <!-- /nb-output -->
@@ -102,7 +104,7 @@ plt.show()
 </div>
 <!-- /nb-output -->
 
-## 7. Plot saved to vault — expect `![[python-plot.png]]` and the file next to this note
+## 7. Plot saved to vault — expect `![](python-plot.png)` and the file next to this note
 
 ```python {format=image id=python-plot}
 import matplotlib.pyplot as plt
@@ -110,7 +112,7 @@ plt.plot([3, 1, 4, 1, 5])
 plt.show()
 ```
 <!-- nb-output id="python-plot" hash="4587154247adb96c" format="image" -->
-![[python-plot.png]]
+![](python-plot.png)
 <!-- /nb-output -->
 
 ## 8. Non-plot output as image — expect the table below rendered to a PNG file (browser fallback)
@@ -120,7 +122,7 @@ import pandas as pd
 pd.DataFrame({"x": [1, 2, 3], "y": ["a", "b", "c"]})
 ```
 <!-- nb-output id="python-table" hash="4c13c6b1a76fa682" format="image" -->
-![[python-table.png]]
+![](python-table.png)
 <!-- /nb-output -->
 
 ## 9. stderr — expect `warning: something looks off` in red, with no `>>>` or `...` prompt prefixes
@@ -131,7 +133,7 @@ print("warning: something looks off", file=sys.stderr)
 ```
 <!-- nb-output hash="906419d0bd2a5773" format="html" -->
 <div class="nb-output">
-<pre class="nb-stream-stderr">... ... ... ... ... ... ... warning: something looks off
+<pre class="nb-stream-stderr">warning: something looks off
 </pre>
 </div>
 <!-- /nb-output -->
@@ -143,9 +145,9 @@ print("warning: something looks off", file=sys.stderr)
 ```
 <!-- nb-output hash="2142bc11d7747559" format="html" -->
 <div class="nb-output">
-<pre class="nb-stream-stderr">&gt;&gt;&gt; ... ... ... ... ... ... ... Traceback (most recent call last):
+<pre class="nb-stream-stderr">Traceback (most recent call last):
   File &quot;&lt;stdin&gt;&quot;, line 2, in &lt;module&gt;
-  File &quot;/var/folders/m9/jlntzhk17ms42d1rwzzkrmzm0000gn/T/nb_setup_1781068925286.py&quot;, line 65, in __nb_run__
+  File &quot;/var/folders/m9/jlntzhk17ms42d1rwzzkrmzm0000gn/T/nb_setup_1781070996718.py&quot;, line 65, in __nb_run__
     result = eval(compile(last_expr, '&lt;nb&gt;', 'eval'), __nb_globals__)
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   File &quot;&lt;nb&gt;&quot;, line 1, in &lt;module&gt;
@@ -162,7 +164,6 @@ print("still alive", counter + 1)
 <!-- nb-output hash="9099f4151ea31414" format="html" -->
 <div class="nb-output">
 <pre class="nb-stream-stdout">still alive 42
-
 </pre>
 </div>
 <!-- /nb-output -->
