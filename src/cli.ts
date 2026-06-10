@@ -21,7 +21,8 @@ import * as fs from "fs";
 import * as path from "path";
 import { webcrypto } from "crypto";
 import { parseRunBlocks, RunBlock } from "./CellParser";
-import { applyOutputBlock, OutputFormat } from "./OutputBlockCore";
+import { applyOutputBlock, OutputFormat, OutputStatus, ERROR_HTML, timeoutHtml } from "./OutputBlockCore";
+import { KernelTimeoutError } from "./kernels/BaseKernel";
 import { hashCodeFence } from "./HashUtils";
 import { renderChunksToHtml, extractImageData, OutputChunk } from "./output/MimeRenderer";
 import { SubprocessKernel } from "./kernels/SubprocessKernel";
@@ -305,13 +306,14 @@ async function main(): Promise<void> {
   };
 
   let failed = false;
-  const results: Array<{ block: RunBlock; chunks: OutputChunk[] }> = [];
+  const results: Array<{ block: RunBlock; chunks: OutputChunk[]; failure: OutputStatus | null }> = [];
   for (const index of selection) {
     const block = blocks[index];
     process.stderr.write(
       `── cell ${index + 1}/${blocks.length} [${block.language}]${block.id ? ` id=${block.id}` : ""}\n`
     );
     const chunks: OutputChunk[] = [];
+    let failure: OutputStatus | null = null;
     try {
       await getKernel(block.language).execute(
         block.source,
@@ -323,23 +325,30 @@ async function main(): Promise<void> {
       );
     } catch (err) {
       failed = true;
+      failure = err instanceof KernelTimeoutError ? "timeout" : "error";
       const msg = err instanceof Error ? err.message : String(err);
-      chunks.push({ type: "error", text: msg });
       process.stderr.write(`${msg}\n`);
     }
-    results.push({ block, chunks });
+    results.push({ block, chunks, failure });
   }
   for (const k of kernels.values()) k.stop();
 
   if (opts.write) {
     let updated = content;
-    for (const { block, chunks } of results) {
+    for (const { block, chunks, failure } of results) {
       const hash = await hashCodeFence(block.language, block.source);
-      const { content: outContent, format } = buildCellOutput(filePath, block, hash, chunks, opts, fm);
+      // Failed cells get the same status blocks the plugin writes
+      const { content: outContent, format, status } = failure
+        ? {
+            content: failure === "timeout" ? timeoutHtml(timeout) : ERROR_HTML,
+            format: "html" as OutputFormat,
+            status: failure,
+          }
+        : { ...buildCellOutput(filePath, block, hash, chunks, opts, fm), status: undefined };
       updated = applyOutputBlock(
         updated,
         { language: block.language, source: block.source, hintLine: block.lineEnd },
-        hash, outContent, format, block.id
+        hash, outContent, format, block.id, status
       );
     }
     fs.writeFileSync(filePath, updated, "utf8");

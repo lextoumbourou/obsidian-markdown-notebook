@@ -38,6 +38,12 @@ const NB_OUTPUT_RE = /^<!-- nb-output (.*?)-->$/;
 const NB_OUTPUT_END = /^<!-- \/nb-output -->$/;
 
 export const INTERRUPTED_HTML = `<div class="nb-status-error">Execution was interrupted</div>`;
+export const ERROR_HTML = `<div class="nb-status-error">Execution failed</div>`;
+
+export function timeoutHtml(timeoutMs: number): string {
+  const secs = timeoutMs / 1000;
+  return `<div class="nb-status-timeout">Execution timed out after ${secs}s</div>`;
+}
 
 /**
  * Split file content into lines, preserving knowledge of the line ending so

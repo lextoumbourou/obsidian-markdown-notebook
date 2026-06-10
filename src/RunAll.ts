@@ -1,7 +1,16 @@
 import { App, Notice, TFile } from "obsidian";
 import { hashCodeFence } from "./HashUtils";
 import { parseRunBlocks, RunBlock } from "./CellParser";
-import { writeOutputBlock, saveImageToVault, imageLink, OutputFormat } from "./OutputBlock";
+import {
+  writeOutputBlock,
+  saveImageToVault,
+  imageLink,
+  OutputFormat,
+  OutputStatus,
+  ERROR_HTML,
+  timeoutHtml,
+} from "./OutputBlock";
+import { KernelTimeoutError } from "./kernels/BaseKernel";
 
 export { parseRunBlocks } from "./CellParser";
 import {
@@ -33,7 +42,9 @@ export async function runAll(
   }
 
   const notice = new Notice(`Running cell 1 / ${blocks.length}…`, 0);
-  const results: Array<RunBlock & { hash: string; content: string; format: OutputFormat }> = [];
+  const results: Array<RunBlock & {
+    hash: string; content: string; format: OutputFormat; status?: OutputStatus;
+  }> = [];
 
   for (let i = 0; i < blocks.length; i++) {
     notice.setMessage(`Running cell ${i + 1} / ${blocks.length}…`);
@@ -42,6 +53,7 @@ export async function runAll(
     const chunks: OutputChunk[] = [];
     const timeout = fm.timeout ?? settings.executionTimeout;
 
+    let failure: OutputStatus | null = null;
     try {
       await getKernel(block.language).execute(
         block.source,
@@ -49,14 +61,21 @@ export async function runAll(
         timeout
       );
     } catch (err) {
+      failure = err instanceof KernelTimeoutError ? "timeout" : "error";
       const msg = err instanceof Error ? err.message : String(err);
-      chunks.push({ type: "error", text: msg });
+      new Notice(`Notebook: cell ${i + 1}: ${msg}`);
     }
 
-    const { content: outContent, format } = await resolveOutput(
-      app, file, hash, chunks, block.id, block.format, settings, fm
-    );
-    results.push({ ...block, hash, content: outContent, format });
+    if (failure) {
+      // Same status blocks the per-cell Run button writes
+      const statusHtml = failure === "timeout" ? timeoutHtml(timeout) : ERROR_HTML;
+      results.push({ ...block, hash, content: statusHtml, format: "html", status: failure });
+    } else {
+      const { content: outContent, format } = await resolveOutput(
+        app, file, hash, chunks, block.id, block.format, settings, fm
+      );
+      results.push({ ...block, hash, content: outContent, format });
+    }
   }
 
   // Writes re-anchor each cell by content; lineEnd is only the duplicate
@@ -65,7 +84,7 @@ export async function runAll(
     await writeOutputBlock(
       app, file,
       { language: result.language, source: result.source, hintLine: result.lineEnd },
-      result.hash, result.content, result.format, result.id
+      result.hash, result.content, result.format, result.id, result.status
     );
   }
 

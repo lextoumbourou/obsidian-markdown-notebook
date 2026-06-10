@@ -21,6 +21,7 @@
 - CRLF files no longer accumulate duplicate output blocks: line splitting handles `\r\n`, writes preserve the file's existing line endings, and content hashes are line-ending-normalized
 - Kernel startup failures are recoverable: a failed start tears down the half-started process and retries on the next run instead of caching the rejection; startup listeners and timers no longer leak
 - Output callbacks no longer fire after a shell cell has timed out
+- "Run all cells" and the `nb-run` CLI now write the same ⏱ timeout / error status blocks as the per-cell Run button — previously the raw failure text was stored as plain output with no status attribute
 
 ### Changed
 - README: corrected the documented default image filename (`<hash>.png` since 0.1.5), documented the `status` output attribute, and noted that image filenames are not namespaced per note

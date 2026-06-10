@@ -10,6 +10,8 @@ import {
   saveImageToVault,
   imageLink,
   OutputFormat,
+  ERROR_HTML,
+  timeoutHtml,
 } from "./OutputBlock";
 import {
   appendChunkToElement,
@@ -27,7 +29,6 @@ import { readNotebookFrontmatter, NotebookFrontmatter } from "./NotebookFrontmat
 type AnyKernel = BaseKernel | ShellKernel;
 
 const RUNNING_HTML = `<div class="nb-status-running"><span class="nb-status-spinner"></span>Running...</div>`;
-const ERROR_HTML = `<div class="nb-status-error">Execution failed</div>`;
 
 /** Cells currently executing, keyed by `${sourcePath}::${hash}`. Lets the
  * stale-block cleanup distinguish a live spinner from a crash leftover. */
@@ -35,11 +36,6 @@ const inFlight = new Set<string>();
 
 export function isCellInFlight(sourcePath: string, hash: string): boolean {
   return inFlight.has(`${sourcePath}::${hash}`);
-}
-
-function timeoutHtml(timeoutMs: number): string {
-  const secs = timeoutMs / 1000;
-  return `<div class="nb-status-timeout">Execution timed out after ${secs}s</div>`;
 }
 
 export interface RunButtonContext {
