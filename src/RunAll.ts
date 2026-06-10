@@ -1,6 +1,9 @@
 import { App, Notice, TFile } from "obsidian";
 import { hashCodeFence } from "./HashUtils";
+import { parseRunBlocks, RunBlock } from "./CellParser";
 import { writeOutputBlock, saveImageToVault, imageLink, OutputFormat } from "./OutputBlock";
+
+export { parseRunBlocks } from "./CellParser";
 import {
   renderChunksToHtml,
   extractImageData,
@@ -10,50 +13,9 @@ import { renderHtmlToPng } from "./output/HtmlToImage";
 import type { BaseKernel } from "./kernels/BaseKernel";
 import type { ShellKernel } from "./kernels/ShellKernel";
 import type { PluginSettings } from "./settings/Settings";
-import { canonicalLang } from "./languages";
 import { readNotebookFrontmatter, NotebookFrontmatter } from "./NotebookFrontmatter";
 
 type AnyKernel = BaseKernel | ShellKernel;
-
-interface RunBlock {
-  language: string;
-  source: string;
-  id: string | undefined;
-  format: string | undefined;
-  lineEnd: number;
-}
-
-/**
- * Parse all executable code blocks from raw file content.
- * All fences for supported languages are included — no {run} marker needed.
- */
-export function parseRunBlocks(content: string): RunBlock[] {
-  const lines = content.split(/\r?\n/);
-  const blocks: RunBlock[] = [];
-  let i = 0;
-
-  while (i < lines.length) {
-    const fenceMatch = lines[i].match(/^```(\w+)(?:\s*\{([^}]*)\})?/);
-    if (fenceMatch) {
-      const lang = canonicalLang(fenceMatch[1]);
-      if (lang) {
-        const args = fenceMatch[2] ?? "";
-        const id = args.match(/id=(\S+)/)?.[1];
-        const format = args.match(/format=(\S+)/)?.[1];
-        const sourceLines: string[] = [];
-        i++;
-        while (i < lines.length && !lines[i].startsWith("```")) {
-          sourceLines.push(lines[i]);
-          i++;
-        }
-        blocks.push({ language: lang, source: sourceLines.join("\n"), id, format, lineEnd: i });
-      }
-    }
-    i++;
-  }
-
-  return blocks;
-}
 
 export async function runAll(
   app: App,

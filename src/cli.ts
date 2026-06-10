@@ -1,0 +1,357 @@
+/**
+ * nb-run — headless cell runner for Markdown Notebook files.
+ *
+ * Runs the same kernels and writes the same nb-output blocks as the Obsidian
+ * plugin, without Obsidian. Built to cli.js by esbuild (npm run build).
+ *
+ *   node cli.js Note.md --list
+ *   node cli.js Note.md --cell 3            # run cells 1..3 (shared kernel state)
+ *   node cli.js Note.md --cell 3 --only     # run just cell 3 (fresh kernel)
+ *   node cli.js Note.md --id revenue-chart
+ *   node cli.js Note.md --write             # run all cells, update output blocks
+ *
+ * Differences from the plugin, by design:
+ * - format=image only saves native images (matplotlib/R PNGs); the browser
+ *   HTML-to-PNG fallback needs a DOM and degrades to format=html here.
+ * - The media folder is resolved relative to the note's directory (the CLI
+ *   has no vault root).
+ */
+/* eslint-disable no-console -- stdout/stderr are the interface of a CLI */
+import * as fs from "fs";
+import * as path from "path";
+import { webcrypto } from "crypto";
+import { parseRunBlocks, RunBlock } from "./CellParser";
+import { applyOutputBlock, OutputFormat } from "./OutputBlockCore";
+import { hashCodeFence } from "./HashUtils";
+import { renderChunksToHtml, extractImageData, OutputChunk } from "./output/MimeRenderer";
+import { SubprocessKernel } from "./kernels/SubprocessKernel";
+import { NodeKernel } from "./kernels/NodeKernel";
+import { ShellKernel } from "./kernels/ShellKernel";
+import { RKernel } from "./kernels/RKernel";
+import type { BaseKernel } from "./kernels/BaseKernel";
+
+// hashCodeFence uses the Web Crypto API; expose it on Node < 19
+if (!globalThis.crypto) {
+  (globalThis as { crypto?: unknown }).crypto = webcrypto;
+}
+
+type AnyKernel = BaseKernel | ShellKernel;
+
+export interface CliOptions {
+  file: string;
+  list: boolean;
+  cell?: number;
+  id?: string;
+  only: boolean;
+  write: boolean;
+  timeout?: number;
+  media?: string;
+  paths: { python: string; node: string; shell: string; r: string };
+}
+
+const USAGE = `Usage: nb-run <file.md> [options]
+
+Options:
+  --list             List the file's executable cells and exit
+  --cell <n>         Target cell by 1-based index (default: last cell)
+  --id <id>          Target cell by its id= arg
+  --only             Run only the target cell (default: run every cell up to
+                     and including it, so earlier cells' state is available)
+  --write            Write nb-output blocks back into the file
+                     (default: print output to stdout only)
+  --timeout <ms>     Per-cell timeout (default: frontmatter notebook.timeout
+                     or 30000)
+  --media <dir>      Folder for format=image PNGs, relative to the note
+                     (default: frontmatter notebook.media or next to the note)
+  --python <path>    Python executable (default: python3)
+  --node <path>      Node executable (default: node)
+  --shell <path>     Shell executable (default: bash)
+  --r <path>         R executable (default: R)
+  -h, --help         Show this help
+
+Cell output streams to stdout/stderr as it runs; status lines go to stderr.
+Exits 1 if any executed cell fails or times out.`;
+
+export function parseArgs(argv: string[]): CliOptions | { error: string } | { help: true } {
+  const opts: CliOptions = {
+    file: "",
+    list: false,
+    only: false,
+    write: false,
+    paths: { python: "python3", node: "node", shell: "bash", r: "R" },
+  };
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    const next = (): string | null => (i + 1 < argv.length ? argv[++i] : null);
+    switch (a) {
+      case "-h":
+      case "--help":
+        return { help: true };
+      case "--list": opts.list = true; break;
+      case "--only": opts.only = true; break;
+      case "--write": opts.write = true; break;
+      case "--cell": {
+        const n = parseInt(next() ?? "", 10);
+        if (isNaN(n)) return { error: "--cell requires a number" };
+        opts.cell = n;
+        break;
+      }
+      case "--id": {
+        const v = next();
+        if (v === null) return { error: "--id requires a value" };
+        opts.id = v;
+        break;
+      }
+      case "--timeout": {
+        const n = parseInt(next() ?? "", 10);
+        if (isNaN(n) || n <= 0) return { error: "--timeout requires a positive number" };
+        opts.timeout = n;
+        break;
+      }
+      case "--media": {
+        const v = next();
+        if (v === null) return { error: "--media requires a value" };
+        opts.media = v;
+        break;
+      }
+      case "--python": case "--node": case "--shell": case "--r": {
+        const v = next();
+        if (v === null) return { error: `${a} requires a value` };
+        opts.paths[a.slice(2) as keyof CliOptions["paths"]] = v;
+        break;
+      }
+      default:
+        if (a.startsWith("-")) return { error: `Unknown option: ${a}` };
+        if (opts.file) return { error: `Unexpected argument: ${a}` };
+        opts.file = a;
+    }
+  }
+  if (!opts.file) return { error: "Missing <file.md> argument" };
+  return opts;
+}
+
+export interface NotebookFm {
+  format?: "html" | "image";
+  media?: string;
+  timeout?: number;
+  markdownLinks?: boolean;
+}
+
+/** Minimal parser for the `notebook:` frontmatter block (flat keys only). */
+export function parseNotebookFrontmatter(content: string): NotebookFm {
+  const lines = content.split(/\r?\n/);
+  if (lines[0]?.trim() !== "---") return {};
+  let end = -1;
+  for (let i = 1; i < lines.length; i++) {
+    if (lines[i].trim() === "---") { end = i; break; }
+  }
+  if (end < 0) return {};
+
+  const fm: NotebookFm = {};
+  let inNotebook = false;
+  for (let i = 1; i < end; i++) {
+    const line = lines[i];
+    if (/^notebook:\s*$/.test(line)) { inNotebook = true; continue; }
+    if (!inNotebook) continue;
+    if (!/^\s/.test(line)) { inNotebook = false; continue; }
+    const m = line.match(/^\s+(\w+):\s*(.+?)\s*$/);
+    if (!m) continue;
+    const key = m[1];
+    const val = m[2].replace(/^["']|["']$/g, "");
+    if (key === "format" && (val === "html" || val === "image")) fm.format = val;
+    else if (key === "media") fm.media = val;
+    else if (key === "timeout" && !isNaN(Number(val))) fm.timeout = Number(val);
+    else if (key === "markdownLinks") fm.markdownLinks = val === "true";
+  }
+  return fm;
+}
+
+/** Resolve which cell indices to execute (run-up-to semantics by default). */
+export function selectCells(
+  blocks: Array<{ id?: string }>,
+  opts: { cell?: number; id?: string; only: boolean }
+): number[] | { error: string } {
+  let target = blocks.length - 1;
+  if (opts.id !== undefined) {
+    target = blocks.findIndex((b) => b.id === opts.id);
+    if (target < 0) return { error: `No cell with id "${opts.id}"` };
+  } else if (opts.cell !== undefined) {
+    if (opts.cell < 1 || opts.cell > blocks.length) {
+      return { error: `Cell ${opts.cell} out of range (file has ${blocks.length} cell${blocks.length === 1 ? "" : "s"})` };
+    }
+    target = opts.cell - 1;
+  }
+  return opts.only ? [target] : Array.from({ length: target + 1 }, (_, i) => i);
+}
+
+function createKernel(lang: string, paths: CliOptions["paths"]): AnyKernel {
+  switch (lang) {
+    case "python":     return new SubprocessKernel(paths.python);
+    case "javascript": return new NodeKernel(paths.node);
+    case "r":          return new RKernel(paths.r);
+    default:           return new ShellKernel(paths.shell);
+  }
+}
+
+function printChunk(chunk: OutputChunk, willWrite: boolean): void {
+  switch (chunk.type) {
+    case "stream":
+      process.stdout.write(chunk.text);
+      break;
+    case "error":
+      process.stderr.write(chunk.text);
+      break;
+    case "rich": {
+      const size = chunk.mime === "image/png"
+        ? `${Math.round(chunk.data.length * 0.75 / 1024)} KB`
+        : `${chunk.data.length} chars`;
+      const hint = willWrite ? "" : " — use --write to store";
+      process.stderr.write(`[${chunk.mime} output, ${size}${hint}]\n`);
+      break;
+    }
+  }
+}
+
+function buildCellOutput(
+  filePath: string,
+  block: RunBlock,
+  hash: string,
+  chunks: OutputChunk[],
+  opts: CliOptions,
+  fm: NotebookFm
+): { content: string; format: OutputFormat } {
+  const format = block.format ?? fm.format ?? "html";
+  if (format === "image") {
+    // Native image data only — the plugin's HTML-to-PNG fallback needs a DOM
+    const img = extractImageData(chunks);
+    if (img) {
+      const noteDir = path.dirname(filePath);
+      const mediaRel = (opts.media ?? fm.media ?? "").trim().replace(/\/+$/, "");
+      const dirAbs = mediaRel ? path.join(noteDir, mediaRel) : noteDir;
+      fs.mkdirSync(dirAbs, { recursive: true });
+      const filename = block.id ? `${block.id}.png` : `${hash}.png`;
+      fs.writeFileSync(path.join(dirAbs, filename), Buffer.from(img, "base64"));
+      const link = fm.markdownLinks
+        ? `![](${mediaRel ? `${mediaRel}/` : ""}${filename})`
+        : `![[${filename}]]`;
+      return { content: link, format: "image" };
+    }
+  }
+  return { content: renderChunksToHtml(chunks), format: "html" };
+}
+
+async function main(): Promise<void> {
+  const parsed = parseArgs(process.argv.slice(2));
+  if ("help" in parsed) {
+    console.log(USAGE);
+    return;
+  }
+  if ("error" in parsed) {
+    console.error(`Error: ${parsed.error}\n\n${USAGE}`);
+    process.exitCode = 2;
+    return;
+  }
+  const opts = parsed;
+
+  const filePath = path.resolve(opts.file);
+  let content: string;
+  try {
+    content = fs.readFileSync(filePath, "utf8");
+  } catch {
+    console.error(`Error: cannot read ${filePath}`);
+    process.exitCode = 2;
+    return;
+  }
+
+  const blocks = parseRunBlocks(content);
+  if (opts.list) {
+    if (blocks.length === 0) {
+      console.log("No executable cells.");
+      return;
+    }
+    for (let i = 0; i < blocks.length; i++) {
+      const b = blocks[i];
+      const firstLine = (b.source.split("\n")[0] ?? "").slice(0, 60);
+      console.log(
+        `${String(i + 1).padStart(3)}  ${b.language.padEnd(10)}  ${(b.id ?? "-").padEnd(14)}  ${firstLine}`
+      );
+    }
+    return;
+  }
+  if (blocks.length === 0) {
+    console.error("No executable cells found.");
+    process.exitCode = 1;
+    return;
+  }
+
+  const selection = selectCells(blocks, opts);
+  if (!Array.isArray(selection)) {
+    console.error(`Error: ${selection.error}`);
+    process.exitCode = 2;
+    return;
+  }
+
+  const fm = parseNotebookFrontmatter(content);
+  const timeout = opts.timeout ?? fm.timeout ?? 30000;
+
+  const kernels = new Map<string, AnyKernel>();
+  const getKernel = (lang: string): AnyKernel => {
+    let k = kernels.get(lang);
+    if (!k) {
+      k = createKernel(lang, opts.paths);
+      kernels.set(lang, k);
+    }
+    return k;
+  };
+
+  let failed = false;
+  const results: Array<{ block: RunBlock; chunks: OutputChunk[] }> = [];
+  for (const index of selection) {
+    const block = blocks[index];
+    process.stderr.write(
+      `── cell ${index + 1}/${blocks.length} [${block.language}]${block.id ? ` id=${block.id}` : ""}\n`
+    );
+    const chunks: OutputChunk[] = [];
+    try {
+      await getKernel(block.language).execute(
+        block.source,
+        (chunk) => {
+          chunks.push(chunk);
+          printChunk(chunk, opts.write);
+        },
+        timeout
+      );
+    } catch (err) {
+      failed = true;
+      const msg = err instanceof Error ? err.message : String(err);
+      chunks.push({ type: "error", text: msg });
+      process.stderr.write(`${msg}\n`);
+    }
+    results.push({ block, chunks });
+  }
+  for (const k of kernels.values()) k.stop();
+
+  if (opts.write) {
+    let updated = content;
+    for (const { block, chunks } of results) {
+      const hash = await hashCodeFence(block.language, block.source);
+      const { content: outContent, format } = buildCellOutput(filePath, block, hash, chunks, opts, fm);
+      updated = applyOutputBlock(
+        updated,
+        { language: block.language, source: block.source, hintLine: block.lineEnd },
+        hash, outContent, format, block.id
+      );
+    }
+    fs.writeFileSync(filePath, updated, "utf8");
+    process.stderr.write(`Wrote ${results.length} output block(s) to ${path.basename(filePath)}\n`);
+  }
+
+  if (failed) process.exitCode = 1;
+}
+
+if (require.main === module) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}

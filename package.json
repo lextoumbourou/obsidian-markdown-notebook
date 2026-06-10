@@ -3,6 +3,9 @@
   "version": "0.1.6",
   "description": "Jupyter-style notebook execution with outputs stored as HTML in Markdown files",
   "main": "main.js",
+  "bin": {
+    "nb-run": "./cli.js"
+  },
   "scripts": {
     "dev": "node esbuild.config.mjs",
     "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",

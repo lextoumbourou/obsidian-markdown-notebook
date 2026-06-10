@@ -217,6 +217,22 @@ npm install
 
 Tests live in `__tests__/` and use Jest + ts-jest. The Obsidian API is mocked in `__mocks__/obsidian.ts` so the suite runs without an Obsidian install.
 
+### CLI runner
+
+`npm run build` also produces `cli.js` (`nb-run`), a headless cell runner that uses the same kernels and writes the same `nb-output` blocks as the plugin — useful for refreshing notebook outputs at publish time, CI, or editing outside Obsidian.
+
+```text
+node cli.js Note.md --list              # list executable cells
+node cli.js Note.md --cell 3            # run cells 1..3 (shared kernel state)
+node cli.js Note.md --cell 3 --only     # run just cell 3 (fresh kernel)
+node cli.js Note.md --id revenue-chart  # run up to the cell with this id
+node cli.js Note.md --write             # run all cells, update output blocks in place
+```
+
+Because each invocation starts fresh kernels, targeting a cell runs every cell *up to and including* it by default (Jupyter's "run up to here"), so earlier cells' variables are available; `--only` skips the prelude. Interpreter paths default to `python3`/`node`/`bash`/`R` and can be overridden with `--python`, `--node`, `--shell`, `--r`. Frontmatter `notebook:` defaults (timeout, format, media, markdownLinks) are respected.
+
+Two differences from the plugin: `format=image` only saves native images (matplotlib/R PNGs) — the browser HTML-to-PNG fallback needs a DOM and degrades to `format=html`; and the media folder is resolved relative to the note's directory, since the CLI has no vault root.
+
 ## Similar Projects
 
 **[Obsidian Code Emitter](https://github.com/mokeyish/obsidian-code-emitter)**

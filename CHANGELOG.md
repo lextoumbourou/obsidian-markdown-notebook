@@ -5,6 +5,7 @@
 ### Added
 - Distinct timeout state for cells: a timed-out cell now writes a `status="timeout"` output block with an "Execution timed out after Ns" message, styled separately from execution errors
 - Example vault (`example-vault/`) for manual smoke testing: openable directly in Obsidian with the plugin symlinked to the repo build output, one annotated test note per language plus notes for timeouts and frontmatter defaults; reset between runs with `git checkout -- example-vault && git clean -fd example-vault`
+- `nb-run` CLI (`cli.js`, built alongside `main.js`): headless cell runner using the same kernels and output-block format as the plugin. Supports `--list`, `--cell N`/`--id X` targeting with run-up-to semantics (`--only` for a single cell on a fresh kernel), `--write` to update blocks in place, frontmatter defaults, and per-interpreter path flags. Native images only for `format=image` (no DOM for the HTML-to-PNG fallback); media folder is note-relative
 
 ### Fixed
 - A single failed execution (timeout or bad interpreter path) no longer permanently poisons a kernel's execution queue — previously every subsequent run of that language failed instantly with the stale error until kernels were restarted
