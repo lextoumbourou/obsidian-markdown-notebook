@@ -45,6 +45,8 @@ Comment markers are invisible in all standard Markdown renderers — including P
 - **Execution count** — `[N]` badge on each run button, Jupyter-style, resets on kernel restart
 - **Run All** — execute every cell in the note in order with a single command
 - **Shared kernel state** — variables defined in one cell are available in subsequent cells
+- **Robust failure handling** — distinct ⏱ timeout state, runaway cells are interrupted on timeout, and output blocks left mid-run by a crash are repaired on next open
+- **Headless runner** — the `nb-run` CLI executes cells and updates outputs without Obsidian (publish pipelines, CI)
 - **Export-friendly** — outputs render correctly in Pelican, PDF, and any HTML-aware renderer
 
 ## Requirements
@@ -54,12 +56,12 @@ Comment markers are invisible in all standard Markdown renderers — including P
   - Python 3.8+ (`python3` on PATH)
   - Node.js 14+ (`node` on PATH)
   - Bash (`bash` on PATH)
-  - R 4.0+ (`Rscript` on PATH)
+  - R 4.0+ (`R` on PATH)
 
-Optional but recommended for Python:
+Optional but recommended for rich output:
 
-- `pandas` — for DataFrame rendering
-- `matplotlib` — for inline plots
+- Python: `pandas` (DataFrame tables), `matplotlib` (inline plots)
+- R: `knitr` + `jsonlite` (data frame tables), `base64enc` (plot capture) — plain-text output works without them
 
 ## Usage
 
@@ -216,6 +218,8 @@ npm install
 | `npm run lint:fix` | Auto-fix lint errors |
 
 Tests live in `__tests__/` and use Jest + ts-jest. The Obsidian API is mocked in `__mocks__/obsidian.ts` so the suite runs without an Obsidian install.
+
+For manual smoke testing, open `example-vault/` directly as an Obsidian vault — the plugin inside it is symlinked to the repo's build output, and each note covers one language or feature with expected results annotated. Reset after a test run with `git checkout -- example-vault && git clean -fd example-vault`.
 
 ### CLI runner
 
