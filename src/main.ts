@@ -10,6 +10,11 @@ import { processCodeBlock, RunButtonContext, isCellInFlight } from "./RunButton"
 import { runAll } from "./RunAll";
 import { clearStaleRunningBlocks } from "./OutputBlock";
 import { SUPPORTED_LANGUAGES, LANG_ALIASES } from "./languages";
+import {
+  clearRunAllToolbarTimers,
+  renderRunAllToolbar,
+  runAllToolbarHooks,
+} from "./RunAllToolbar";
 
 type AnyKernel = BaseKernel | ShellKernel;
 
@@ -52,6 +57,10 @@ export default class MarkdownNotebookPlugin extends Plugin {
       );
     }
 
+    this.registerMarkdownPostProcessor((el, ctx) => {
+      void renderRunAllToolbar(el, ctx, context);
+    });
+
     // A `status="running"` spinner block survives in the file if Obsidian
     // quit (or the plugin reloaded) mid-execution — repair it on file open.
     this.registerEvent(
@@ -92,12 +101,19 @@ export default class MarkdownNotebookPlugin extends Plugin {
           new Notice("No active Markdown file.");
           return;
         }
-        runAll(this.app, file, (lang) => this.getKernel(lang), this.settings);
+        void runAll(
+          this.app,
+          file,
+          (lang) => this.getKernel(lang),
+          this.settings,
+          runAllToolbarHooks(file.path),
+        );
       },
     });
   }
 
   onunload() {
+    clearRunAllToolbarTimers();
     for (const k of this.kernels.values()) k.stop();
   }
 

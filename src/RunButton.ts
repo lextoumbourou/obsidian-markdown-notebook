@@ -25,6 +25,7 @@ import type { BaseKernel } from "./kernels/BaseKernel";
 import type { ShellKernel } from "./kernels/ShellKernel";
 import type { PluginSettings } from "./settings/Settings";
 import { readNotebookFrontmatter, NotebookFrontmatter } from "./NotebookFrontmatter";
+import { scheduleRunAllToolbarRender } from "./RunAllToolbar";
 
 type AnyKernel = BaseKernel | ShellKernel;
 
@@ -82,6 +83,7 @@ export async function processCodeBlock(
   context: RunButtonContext,
   language: string
 ): Promise<void> {
+  scheduleRunAllToolbarRender(ctx, context);
   const { app } = context;
 
   const settings = context.getSettings();
