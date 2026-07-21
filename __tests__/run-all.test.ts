@@ -6,6 +6,7 @@ import {
   runAll,
 } from '../src/RunAll';
 import { DEFAULT_SETTINGS } from '../src/settings/Settings';
+import * as HtmlToImage from '../src/output/HtmlToImage';
 
 type RunAllResult = {
   total: number;
@@ -41,6 +42,14 @@ function memoryNotebook(initial: string) {
       process: jest.fn(async (_file: TFile, transform: (raw: string) => string) => {
         content = transform(content);
       }),
+      adapter: {
+        exists: jest.fn(async () => false),
+        writeBinary: jest.fn(async () => undefined),
+      },
+      createBinary: jest.fn(async () => undefined),
+      modifyBinary: jest.fn(async () => undefined),
+      createFolder: jest.fn(async () => undefined),
+      getAbstractFileByPath: jest.fn(() => null),
     },
   };
   return {
@@ -345,5 +354,97 @@ describe('runAll', () => {
 
     expect(second.skipped).toBe(true);
     expect(calls).toBe(1);
+  });
+
+  it('treats a vault read rejection after unload as cancellation', async () => {
+    const memory = memoryNotebook(notebook('print("never")'));
+    let rejectRead!: (error: Error) => void;
+    memory.app.vault.read.mockImplementation(() => new Promise<string>((_resolve, reject) => {
+      rejectRead = reject;
+    }));
+    const onComplete = jest.fn();
+
+    const running = runAllWithHooks(
+      memory.app,
+      memory.file,
+      () => ({ executionCount: 0, execute: jest.fn() }),
+      DEFAULT_SETTINGS,
+      { onComplete }
+    );
+    await Promise.resolve();
+    disposeRunAll();
+    rejectRead(new Error('vault closed'));
+    const result = await running;
+
+    expect(result.skipped).toBe(true);
+    expect(onComplete).not.toHaveBeenCalled();
+  });
+
+  it('does not save an image when unload occurs during HTML rendering', async () => {
+    const memory = memoryNotebook('```python {format=image}\nprint("plot")\n```');
+    let finishRender!: (data: string | null) => void;
+    let markRendering!: () => void;
+    const rendering = new Promise<void>((resolve) => { markRendering = resolve; });
+    const renderSpy = jest.spyOn(HtmlToImage, 'renderHtmlToPng').mockImplementation(() => {
+      markRendering();
+      return new Promise<string | null>((resolve) => { finishRender = resolve; });
+    });
+    const kernel = {
+      executionCount: 0,
+      async execute(_source: string, onChunk: (chunk: unknown) => void) {
+        this.executionCount += 1;
+        onChunk({ type: 'stream', stream: 'stdout', text: 'plot\n' });
+      },
+    };
+
+    const running = runAllWithHooks(
+      memory.app,
+      memory.file,
+      () => kernel,
+      DEFAULT_SETTINGS
+    );
+    await rendering;
+    disposeRunAll();
+    finishRender('aGVsbG8=');
+    const result = await running;
+    renderSpy.mockRestore();
+
+    expect(result.skipped).toBe(true);
+    expect(memory.app.vault.adapter.exists).not.toHaveBeenCalled();
+    expect(memory.app.vault.createBinary).not.toHaveBeenCalled();
+    expect(memory.app.vault.process).not.toHaveBeenCalled();
+  });
+
+  it('does not continue image mutations when unload occurs during a vault check', async () => {
+    const memory = memoryNotebook('```python {format=image}\nprint("plot")\n```');
+    let finishExists!: (exists: boolean) => void;
+    let markChecking!: () => void;
+    const checking = new Promise<void>((resolve) => { markChecking = resolve; });
+    memory.app.vault.adapter.exists.mockImplementation(() => {
+      markChecking();
+      return new Promise<boolean>((resolve) => { finishExists = resolve; });
+    });
+    const kernel = {
+      executionCount: 0,
+      async execute(_source: string, onChunk: (chunk: unknown) => void) {
+        this.executionCount += 1;
+        onChunk({ type: 'rich', mime: 'image/png', data: 'aGVsbG8=' });
+      },
+    };
+
+    const running = runAllWithHooks(
+      memory.app,
+      memory.file,
+      () => kernel,
+      DEFAULT_SETTINGS
+    );
+    await checking;
+    disposeRunAll();
+    finishExists(false);
+    const result = await running;
+
+    expect(result.skipped).toBe(true);
+    expect(memory.app.vault.createBinary).not.toHaveBeenCalled();
+    expect(memory.app.vault.process).not.toHaveBeenCalled();
   });
 });

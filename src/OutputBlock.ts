@@ -28,13 +28,17 @@ export async function writeOutputBlock(
   content: string,
   format: OutputFormat = "html",
   id?: string,
-  status?: OutputStatus
+  status?: OutputStatus,
+  assertActive: () => void = () => undefined
 ): Promise<boolean> {
   let cellExists = false;
+  assertActive();
   await app.vault.process(file, (raw) => {
+    assertActive();
     cellExists = findCellFenceEnd(raw.split(/\r?\n/), cell) !== null;
     return applyOutputBlock(raw, cell, hash, content, format, id, status);
   });
+  assertActive();
   return cellExists;
 }
 
@@ -71,8 +75,10 @@ export async function saveImageToVault(
   id: string | undefined,
   hash: string,
   base64: string,
-  mediaPath: string
+  mediaPath: string,
+  assertActive: () => void = () => undefined
 ): Promise<{ filename: string; vaultPath: string }> {
+  assertActive();
   const filename = id ? `${id}.png` : `${hash}.png`;
   const dir = normalizeDir(
     (mediaPath.trim().replace(/\/+$/, "")) || noteFile.parent?.path || ""
@@ -84,23 +90,38 @@ export async function saveImageToVault(
   const view = new Uint8Array(ab);
   for (let i = 0; i < binaryStr.length; i++) view[i] = binaryStr.charCodeAt(i);
 
-  if (dir && !(await app.vault.adapter.exists(dir))) {
-    await app.vault.createFolder(dir);
+  if (dir) {
+    assertActive();
+    const dirExists = await app.vault.adapter.exists(dir);
+    assertActive();
+    if (!dirExists) {
+      assertActive();
+      await app.vault.createFolder(dir);
+      assertActive();
+    }
   }
 
+  assertActive();
   const fileExists = await app.vault.adapter.exists(vaultPath);
+  assertActive();
   if (fileExists) {
     const f = app.vault.getAbstractFileByPath(vaultPath);
+    assertActive();
     if (f instanceof TFile) {
       await app.vault.modifyBinary(f, ab);
+      assertActive();
     } else {
       // Index is stale — write directly via adapter
       await app.vault.adapter.writeBinary(vaultPath, ab);
+      assertActive();
     }
   } else {
+    assertActive();
     await app.vault.createBinary(vaultPath, ab);
+    assertActive();
   }
 
+  assertActive();
   return { filename, vaultPath };
 }
 

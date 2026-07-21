@@ -75,9 +75,13 @@ export function disposeRunAll(): void {
 }
 
 function throwIfRunCancelled(generation: number): void {
-  if (!runAllEnabled || generation !== runAllGeneration) {
+  if (isRunCancelled(generation)) {
     throw new RunAllCancelledError();
   }
+}
+
+function isRunCancelled(generation: number): boolean {
+  return !runAllEnabled || generation !== runAllGeneration;
 }
 
 export function getRunAllProgress(sourcePath: string): RunAllProgress | undefined {
@@ -178,6 +182,7 @@ export async function runAll(
         hash = await hashCodeFence(block.language, block.source);
         throwIfRunCancelled(generation);
       } catch (err) {
+        if (isRunCancelled(generation)) throw new RunAllCancelledError();
         if (err instanceof RunAllCancelledError) throw err;
         failedCells.add(i);
         completedCells += 1;
@@ -198,9 +203,7 @@ export async function runAll(
         );
         throwIfRunCancelled(generation);
       } catch (err) {
-        if (!runAllEnabled || generation !== runAllGeneration) {
-          throw new RunAllCancelledError();
-        }
+        if (isRunCancelled(generation)) throw new RunAllCancelledError();
         failure = err instanceof KernelTimeoutError ? "timeout" : "error";
         failedCells.add(i);
         const msg = err instanceof Error ? err.message : String(err);
@@ -223,11 +226,13 @@ export async function runAll(
 
       try {
         const { content: outContent, format } = await resolveOutput(
-          app, file, hash, chunks, block.id, block.format, settings, fm
+          app, file, hash, chunks, block.id, block.format, settings, fm,
+          () => throwIfRunCancelled(generation)
         );
         throwIfRunCancelled(generation);
         results.push({ ...block, cellIndex: i, hash, content: outContent, format });
       } catch (err) {
+        if (isRunCancelled(generation)) throw new RunAllCancelledError();
         if (err instanceof RunAllCancelledError) throw err;
         failedCells.add(i);
         const msg = err instanceof Error ? err.message : String(err);
@@ -253,7 +258,8 @@ export async function runAll(
         const saved = await writeOutputBlock(
           app, file,
           { language: result.language, source: result.source, hintLine: result.lineEnd },
-          result.hash, result.content, result.format, result.id, result.status
+          result.hash, result.content, result.format, result.id, result.status,
+          () => throwIfRunCancelled(generation)
         );
         throwIfRunCancelled(generation);
         if (!saved) {
@@ -264,6 +270,7 @@ export async function runAll(
           );
         }
       } catch (err) {
+        if (isRunCancelled(generation)) throw new RunAllCancelledError();
         if (err instanceof RunAllCancelledError) throw err;
         failedCells.add(result.cellIndex);
         const cellNumber = result.cellIndex + 1;
@@ -290,7 +297,7 @@ export async function runAll(
     callHook(hooks, "onComplete", summary);
     return summary;
   } catch (err) {
-    if (err instanceof RunAllCancelledError) {
+    if (isRunCancelled(generation) || err instanceof RunAllCancelledError) {
       const succeeded = Math.max(0, completedCells - failedCells.size);
       return {
         total,
@@ -329,19 +336,29 @@ async function resolveOutput(
   formatArg: string | undefined,
   settings: PluginSettings,
   fm: NotebookFrontmatter,
+  assertActive: () => void,
 ): Promise<{ content: string; format: OutputFormat }> {
+  assertActive();
   const outputFormat = formatArg ?? fm.format ?? settings.defaultFormat;
   const mediaPath = fm.media ?? settings.mediaPath;
   const markdownLinks = fm.markdownLinks ?? settings.markdownImageLinks;
 
   if (outputFormat === "image") {
     // Prefer native image data (matplotlib, R plots, etc.)
-    const imgData = extractImageData(chunks) ??
-      await renderHtmlToPng(renderChunksToHtml(chunks));
+    let imgData = extractImageData(chunks);
+    if (!imgData) {
+      assertActive();
+      imgData = await renderHtmlToPng(renderChunksToHtml(chunks));
+      assertActive();
+    }
     if (imgData) {
-      const { filename, vaultPath } = await saveImageToVault(app, file, id, hash, imgData, mediaPath);
+      const { filename, vaultPath } = await saveImageToVault(
+        app, file, id, hash, imgData, mediaPath, assertActive
+      );
+      assertActive();
       return { content: imageLink(filename, vaultPath, file, markdownLinks), format: "image" };
     }
   }
+  assertActive();
   return { content: renderChunksToHtml(chunks), format: "html" };
 }
