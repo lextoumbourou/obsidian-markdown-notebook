@@ -11,7 +11,8 @@ import { runAll } from "./RunAll";
 import { clearStaleRunningBlocks } from "./OutputBlock";
 import { SUPPORTED_LANGUAGES, LANG_ALIASES } from "./languages";
 import {
-  clearRunAllToolbarTimers,
+  activateRunAllToolbar,
+  disposeRunAllToolbar,
   renderRunAllToolbar,
   runAllToolbarHooks,
 } from "./RunAllToolbar";
@@ -23,6 +24,7 @@ export default class MarkdownNotebookPlugin extends Plugin {
   private kernels: Map<string, AnyKernel> = new Map();
 
   async onload() {
+    activateRunAllToolbar();
     await this.loadSettings();
     this.addSettingTab(new SettingsTab(this.app, this));
 
@@ -113,7 +115,7 @@ export default class MarkdownNotebookPlugin extends Plugin {
   }
 
   onunload() {
-    clearRunAllToolbarTimers();
+    disposeRunAllToolbar();
     for (const k of this.kernels.values()) k.stop();
   }
 

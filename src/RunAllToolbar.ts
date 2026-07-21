@@ -18,6 +18,42 @@ export interface RunAllToolbarContext {
   getSettings: () => PluginSettings;
 }
 
+const toolbarTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const toolbarElements = new Set<HTMLElement>();
+const toolbarHosts = new Set<HTMLElement>();
+let toolbarEnabled = true;
+let toolbarGeneration = 0;
+let renderSequence = 0;
+
+export function activateRunAllToolbar(): void {
+  toolbarEnabled = true;
+  toolbarGeneration += 1;
+}
+
+export function clearRunAllToolbarTimers(): void {
+  for (const timer of toolbarTimers.values()) clearTimeout(timer);
+  toolbarTimers.clear();
+}
+
+export function disposeRunAllToolbar(): void {
+  toolbarEnabled = false;
+  toolbarGeneration += 1;
+  clearRunAllToolbarTimers();
+  for (const toolbar of toolbarElements) toolbar.remove();
+  toolbarElements.clear();
+  for (const host of toolbarHosts) {
+    delete host.dataset.nbRunAllToolbarPending;
+    delete host.dataset.nbRunAllToolbarRequestedSource;
+  }
+  toolbarHosts.clear();
+}
+
+function removeToolbar(toolbar: HTMLElement | null): void {
+  if (!toolbar) return;
+  toolbarElements.delete(toolbar);
+  toolbar.remove();
+}
+
 function cellCountLabel(total: number): string {
   return `${total} cell${total === 1 ? "" : "s"}`;
 }
@@ -41,9 +77,7 @@ function updateToolbar(toolbar: HTMLElement, state: RunAllProgress): void {
 }
 
 export function setRunAllToolbarState(sourcePath: string, state: RunAllProgress): void {
-  if (typeof document === "undefined") return;
-  const toolbars = document.querySelectorAll<HTMLElement>(".nb-run-all-toolbar");
-  for (const toolbar of Array.from(toolbars)) {
+  for (const toolbar of toolbarElements) {
     if (toolbar.dataset.sourcePath === sourcePath) updateToolbar(toolbar, state);
   }
 }
@@ -105,11 +139,14 @@ async function findToolbarHost(
   el: HTMLElement,
   sourcePath: string,
   app: App,
+  generation: number,
 ): Promise<HTMLElement | null> {
   for (let attempt = 0; attempt < 20; attempt++) {
+    if (!toolbarEnabled || generation !== toolbarGeneration) return null;
+    const directHost = el.closest<HTMLElement>(".markdown-preview-view")
+      ?? el.closest<HTMLElement>(".markdown-preview-sizer");
     const workspaceHost = findToolbarHostsInWorkspace(app, sourcePath)[0];
-    const directHost = el.closest<HTMLElement>(".markdown-preview-sizer");
-    const host = workspaceHost ?? directHost;
+    const host = directHost ?? workspaceHost;
     if (host) return host;
     await waitForRenderTurn();
   }
@@ -122,27 +159,32 @@ function isMarkdownFile(file: unknown): file is TFile {
   return typeof candidate.path === "string" && candidate.extension === "md";
 }
 
-export async function renderRunAllToolbar(
-  el: HTMLElement,
-  ctx: MarkdownPostProcessorContext,
+async function renderToolbarInHost(
+  host: HTMLElement,
+  sourcePath: string,
   context: RunAllToolbarContext,
+  generation: number,
 ): Promise<void> {
-  const host = await findToolbarHost(el, ctx.sourcePath, context.app);
-  if (!host) return;
+  if (!toolbarEnabled || generation !== toolbarGeneration) return;
+  toolbarHosts.add(host);
+  host.dataset.nbRunAllToolbarRequestedSource = sourcePath;
+  if (host.dataset.nbRunAllToolbarPending) return;
+
+  const renderToken = `${generation}:${++renderSequence}`;
+  host.dataset.nbRunAllToolbarPending = renderToken;
   let toolbar = host.querySelector<HTMLElement>(".nb-run-all-toolbar");
-  if (toolbar && toolbar.dataset.sourcePath !== ctx.sourcePath) {
-    toolbar.remove();
+  if (toolbar && toolbar.dataset.sourcePath !== sourcePath) {
+    removeToolbar(toolbar);
     toolbar = null;
   }
-  if (host.dataset.nbRunAllToolbarPending === "true") return;
-  host.dataset.nbRunAllToolbarPending = "true";
 
   try {
-    const file = context.app.vault.getAbstractFileByPath(ctx.sourcePath);
+    const file = context.app.vault.getAbstractFileByPath(sourcePath);
     if (!isMarkdownFile(file)) return;
 
     if (!toolbar) {
       toolbar = host.createDiv({ cls: "nb-run-all-toolbar" });
+      toolbarElements.add(toolbar);
       toolbar.dataset.sourcePath = file.path;
       toolbar.dataset.cellCount = "0";
       const button = toolbar.createEl("button", {
@@ -156,7 +198,7 @@ export async function renderRunAllToolbar(
       host.prepend(toolbar);
 
       button.addEventListener("click", async () => {
-        const currentFile = context.app.vault.getAbstractFileByPath(ctx.sourcePath);
+        const currentFile = context.app.vault.getAbstractFileByPath(sourcePath);
         if (!isMarkdownFile(currentFile)) {
           new Notice("No active Markdown file.");
           return;
@@ -172,9 +214,15 @@ export async function renderRunAllToolbar(
     }
 
     const content = await context.app.vault.read(file);
+    if (
+      !toolbarEnabled
+      || generation !== toolbarGeneration
+      || host.dataset.nbRunAllToolbarRequestedSource !== sourcePath
+    ) return;
+
     const blocks = parseRunBlocks(content);
     if (blocks.length === 0) {
-      toolbar.remove();
+      removeToolbar(toolbar);
       return;
     }
 
@@ -184,34 +232,52 @@ export async function renderRunAllToolbar(
       currentState ?? { running: false, current: blocks.length, total: blocks.length },
     );
   } catch (err) {
-    if (toolbar?.dataset.cellCount === "0") toolbar.remove();
+    if (toolbar?.dataset.cellCount === "0") removeToolbar(toolbar);
     console.error("[MarkdownNotebook] Failed to render Run all toolbar:", err);
   } finally {
-    delete host.dataset.nbRunAllToolbarPending;
+    if (host.dataset.nbRunAllToolbarPending === renderToken) {
+      delete host.dataset.nbRunAllToolbarPending;
+      if (toolbarEnabled && generation === toolbarGeneration) {
+        const requestedSource = host.dataset.nbRunAllToolbarRequestedSource;
+        if (requestedSource && requestedSource !== sourcePath) {
+          void renderToolbarInHost(host, requestedSource, context, generation);
+        } else {
+          delete host.dataset.nbRunAllToolbarRequestedSource;
+        }
+      }
+    }
   }
 }
 
-const toolbarTimers = new Map<string, ReturnType<typeof setTimeout>>();
+export async function renderRunAllToolbar(
+  el: HTMLElement,
+  ctx: MarkdownPostProcessorContext,
+  context: RunAllToolbarContext,
+): Promise<void> {
+  const generation = toolbarGeneration;
+  if (!toolbarEnabled) return;
+  const host = await findToolbarHost(el, ctx.sourcePath, context.app, generation);
+  if (!host) return;
+  await renderToolbarInHost(host, ctx.sourcePath, context, generation);
+}
 
 export function scheduleRunAllToolbarRender(
   ctx: MarkdownPostProcessorContext,
   context: RunAllToolbarContext,
   delay = 200,
 ): void {
+  if (!toolbarEnabled) return;
   const sourcePath = ctx.sourcePath;
+  const generation = toolbarGeneration;
   const existing = toolbarTimers.get(sourcePath);
   if (existing) clearTimeout(existing);
 
   const timer = setTimeout(() => {
     toolbarTimers.delete(sourcePath);
+    if (!toolbarEnabled || generation !== toolbarGeneration) return;
     for (const host of findToolbarHostsInWorkspace(context.app, sourcePath)) {
-      void renderRunAllToolbar(host, ctx, context);
+      void renderToolbarInHost(host, sourcePath, context, generation);
     }
   }, delay);
   toolbarTimers.set(sourcePath, timer);
-}
-
-export function clearRunAllToolbarTimers(): void {
-  for (const timer of toolbarTimers.values()) clearTimeout(timer);
-  toolbarTimers.clear();
 }

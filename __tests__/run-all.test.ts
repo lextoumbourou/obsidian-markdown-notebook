@@ -35,7 +35,12 @@ function memoryNotebook(initial: string) {
       }),
     },
   };
-  return { app, file, content: () => content };
+  return {
+    app,
+    file,
+    content: () => content,
+    setContent: (next: string) => { content = next; },
+  };
 }
 
 describe('parseRunBlocks', () => {
@@ -209,5 +214,54 @@ describe('runAll', () => {
 
     expect(second.skipped).toBe(true);
     expect(calls).toBe(1);
+  });
+
+  it('marks a cell failed when it was edited before its output could be saved', async () => {
+    const memory = memoryNotebook(notebook('print("original")'));
+    const kernel = {
+      executionCount: 0,
+      async execute() {
+        this.executionCount += 1;
+        memory.setContent('# Cell edited while execution was running');
+      },
+    };
+
+    const result = await runAllWithHooks(
+      memory.app,
+      memory.file,
+      () => kernel,
+      DEFAULT_SETTINGS
+    );
+
+    expect(result).toEqual({ total: 1, succeeded: 0, failed: 1, skipped: false });
+    expect(memory.content()).not.toContain('<!-- nb-output');
+  });
+
+  it('continues to later cells when hashing one cell fails', async () => {
+    const memory = memoryNotebook(notebook('print("first")', 'print("second")'));
+    const digest = jest.spyOn(globalThis.crypto.subtle, 'digest');
+    digest.mockRejectedValueOnce(new Error('digest unavailable'));
+    const consoleError = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    const executed: string[] = [];
+    const kernel = {
+      executionCount: 0,
+      async execute(source: string) {
+        this.executionCount += 1;
+        executed.push(source);
+      },
+    };
+
+    const result = await runAllWithHooks(
+      memory.app,
+      memory.file,
+      () => kernel,
+      DEFAULT_SETTINGS
+    );
+    digest.mockRestore();
+    consoleError.mockRestore();
+
+    expect(result).toEqual({ total: 2, succeeded: 1, failed: 1, skipped: false });
+    expect(executed).toEqual(['print("second")']);
+    expect(memory.content().match(/<!-- nb-output/g)).toHaveLength(1);
   });
 });

@@ -1,7 +1,10 @@
 import type { MarkdownPostProcessorContext } from 'obsidian';
 import {
+  activateRunAllToolbar,
   clearRunAllToolbarTimers,
+  disposeRunAllToolbar,
   renderRunAllToolbar,
+  runAllToolbarHooks,
   scheduleRunAllToolbarRender,
 } from '../src/RunAllToolbar';
 import { DEFAULT_SETTINGS } from '../src/settings/Settings';
@@ -109,7 +112,12 @@ function fixture(markdown = notebook('print("one")')) {
   };
 }
 
-afterEach(() => clearRunAllToolbarTimers());
+beforeEach(() => activateRunAllToolbar());
+afterEach(() => {
+  clearRunAllToolbarTimers();
+  disposeRunAllToolbar();
+  jest.useRealTimers();
+});
 
 describe('Run All toolbar', () => {
   it('inserts one toolbar at the top of a rendered notebook and shows the cell count', async () => {
@@ -185,6 +193,59 @@ describe('Run All toolbar', () => {
     expect(host.querySelector('.nb-run-all-toolbar')?.dataset.sourcePath).toBe(nextFile.path);
   });
 
+  it('queues the latest note when a previous render is still reading the file', async () => {
+    const { app, context, ctx, file } = fixture();
+    const nextFile = { path: 'next.md', extension: 'md', parent: { path: '' } };
+    app.vault.getAbstractFileByPath.mockImplementation((path?: string) => {
+      if (path === file.path) return file;
+      if (path === nextFile.path) return nextFile;
+      return null;
+    });
+    let finishFirstRead!: (value: string) => void;
+    app.vault.read.mockImplementation((candidate?: { path?: string }) => {
+      if (candidate?.path === file.path) {
+        return new Promise<string>((resolve) => { finishFirstRead = resolve; });
+      }
+      return Promise.resolve(notebook('print("next")'));
+    });
+    const host = new FakeElement('markdown-preview-sizer');
+    const section = host.createDiv({ cls: 'markdown-preview-section' });
+
+    const firstRender = renderRunAllToolbar(section as unknown as HTMLElement, ctx, context as never);
+    await Promise.resolve();
+    await Promise.resolve();
+    const nextContext = { sourcePath: nextFile.path } as MarkdownPostProcessorContext;
+    await renderRunAllToolbar(section as unknown as HTMLElement, nextContext, context as never);
+    finishFirstRead(notebook('print("first")'));
+    await firstRender;
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(host.querySelectorAll('.nb-run-all-toolbar')).toHaveLength(1);
+    expect(host.querySelector('.nb-run-all-toolbar')?.dataset.sourcePath).toBe(nextFile.path);
+  });
+
+  it('removes toolbars and ignores delayed renders after plugin unload', async () => {
+    const { app, context, ctx } = fixture();
+    let finishRead!: (value: string) => void;
+    app.vault.read.mockImplementation(() => new Promise<string>((resolve) => {
+      finishRead = resolve;
+    }));
+    const host = new FakeElement('markdown-preview-sizer');
+    const section = host.createDiv({ cls: 'markdown-preview-section' });
+
+    const rendering = renderRunAllToolbar(section as unknown as HTMLElement, ctx, context as never);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(host.querySelector('.nb-run-all-toolbar')).not.toBeNull();
+
+    disposeRunAllToolbar();
+    finishRead(notebook('print("late")'));
+    await rendering;
+
+    expect(host.querySelector('.nb-run-all-toolbar')).toBeNull();
+  });
+
   it('uses the stable Markdown preview container discovered through the workspace', async () => {
     jest.useFakeTimers();
     const { app, context, ctx, file } = fixture();
@@ -201,6 +262,30 @@ describe('Run All toolbar', () => {
     const toolbar = viewContainer.querySelector('.nb-run-all-toolbar');
     expect(toolbar).not.toBeNull();
     expect(toolbar?.parentElement).toBe(previewView);
-    jest.useRealTimers();
+  });
+
+  it('renders a toolbar in every pane when the same note is open twice', async () => {
+    jest.useFakeTimers();
+    const { app, context, ctx, file } = fixture();
+    const firstContainer = new FakeElement('workspace-leaf-content');
+    const firstPreview = firstContainer.createDiv({ cls: 'markdown-preview-view' });
+    firstPreview.createDiv({ cls: 'markdown-preview-sizer' });
+    const secondContainer = new FakeElement('workspace-leaf-content');
+    const secondPreview = secondContainer.createDiv({ cls: 'markdown-preview-view' });
+    secondPreview.createDiv({ cls: 'markdown-preview-sizer' });
+    app.workspace.getLeavesOfType.mockReturnValue([
+      { view: { file, contentEl: firstContainer, containerEl: firstContainer } },
+      { view: { file, contentEl: secondContainer, containerEl: secondContainer } },
+    ] as never);
+
+    scheduleRunAllToolbarRender(ctx, context as never, 0);
+    await jest.runAllTimersAsync();
+
+    expect(firstPreview.querySelectorAll('.nb-run-all-toolbar')).toHaveLength(1);
+    expect(secondPreview.querySelectorAll('.nb-run-all-toolbar')).toHaveLength(1);
+
+    runAllToolbarHooks(file.path).onProgress?.({ current: 1, total: 1 });
+    expect(firstPreview.querySelector('.nb-run-all-status')?.textContent).toBe('Running 1 / 1');
+    expect(secondPreview.querySelector('.nb-run-all-status')?.textContent).toBe('Running 1 / 1');
   });
 });

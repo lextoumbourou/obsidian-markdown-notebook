@@ -120,7 +120,17 @@ export async function runAll(
       callHook(hooks, "onProgress", { current, total });
       notice.setMessage(`Running cell ${current} / ${total}…`);
       const block = blocks[i];
-      const hash = await hashCodeFence(block.language, block.source);
+      let hash: string;
+      try {
+        hash = await hashCodeFence(block.language, block.source);
+      } catch (err) {
+        failedCells.add(i);
+        completedCells += 1;
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`[MarkdownNotebook] Cell ${current} hashing failed:`, err);
+        new Notice(`Notebook: cell ${current} could not be prepared: ${msg}`);
+        continue;
+      }
       const chunks: OutputChunk[] = [];
       const timeout = fm.timeout ?? settings.executionTimeout;
 
@@ -178,11 +188,18 @@ export async function runAll(
     // tie-breaker hint. Reverse order keeps the hints closest to accurate.
     for (const result of [...results].reverse()) {
       try {
-        await writeOutputBlock(
+        const saved = await writeOutputBlock(
           app, file,
           { language: result.language, source: result.source, hintLine: result.lineEnd },
           result.hash, result.content, result.format, result.id, result.status
         );
+        if (!saved) {
+          failedCells.add(result.cellIndex);
+          const cellNumber = result.cellIndex + 1;
+          new Notice(
+            `Notebook: cell ${cellNumber} changed before its output could be saved.`
+          );
+        }
       } catch (err) {
         failedCells.add(result.cellIndex);
         const cellNumber = result.cellIndex + 1;
@@ -210,10 +227,11 @@ export async function runAll(
     const msg = err instanceof Error ? err.message : String(err);
     console.error("[MarkdownNotebook] Run all failed:", err);
     new Notice(`Notebook: run all failed: ${msg}`);
+    const succeeded = Math.max(0, completedCells - failedCells.size);
     const summary = {
       total,
-      succeeded: Math.max(0, completedCells - failedCells.size),
-      failed: failedCells.size + (completedCells < total ? 1 : 0),
+      succeeded,
+      failed: Math.max(failedCells.size, total - succeeded),
       skipped: false,
     };
     callHook(hooks, "onComplete", summary);

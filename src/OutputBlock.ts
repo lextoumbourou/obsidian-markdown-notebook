@@ -4,6 +4,7 @@ import {
   removeOutputBlock,
   applyStaleRunningCleanup,
   CellLocator,
+  findCellFenceEnd,
   OutputFormat,
   OutputStatus,
 } from "./OutputBlockCore";
@@ -28,10 +29,13 @@ export async function writeOutputBlock(
   format: OutputFormat = "html",
   id?: string,
   status?: OutputStatus
-): Promise<void> {
-  await app.vault.process(file, (raw) =>
-    applyOutputBlock(raw, cell, hash, content, format, id, status)
-  );
+): Promise<boolean> {
+  let cellExists = false;
+  await app.vault.process(file, (raw) => {
+    cellExists = findCellFenceEnd(raw.split(/\r?\n/), cell) !== null;
+    return applyOutputBlock(raw, cell, hash, content, format, id, status);
+  });
+  return cellExists;
 }
 
 /**
