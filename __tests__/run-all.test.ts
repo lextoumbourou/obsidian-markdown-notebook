@@ -1,5 +1,10 @@
 import { TFile } from 'obsidian';
-import { parseRunBlocks, runAll } from '../src/RunAll';
+import {
+  activateRunAll,
+  disposeRunAll,
+  parseRunBlocks,
+  runAll,
+} from '../src/RunAll';
 import { DEFAULT_SETTINGS } from '../src/settings/Settings';
 
 type RunAllResult = {
@@ -14,7 +19,10 @@ type RunAllWithHooks = (
   file: TFile,
   getKernel: (language: string) => unknown,
   settings: typeof DEFAULT_SETTINGS,
-  hooks?: { onProgress?: (progress: { current: number; total: number }) => void }
+  hooks?: {
+    onProgress?: (progress: { current: number; total: number }) => void;
+    onComplete?: (summary: RunAllResult) => void;
+  }
 ) => Promise<RunAllResult>;
 
 function notebook(...sources: string[]): string {
@@ -158,6 +166,9 @@ describe('parseRunBlocks', () => {
 describe('runAll', () => {
   const runAllWithHooks = runAll as unknown as RunAllWithHooks;
 
+  beforeEach(() => activateRunAll());
+  afterEach(() => disposeRunAll());
+
   it('continues after a failed cell and reports progress and totals', async () => {
     const memory = memoryNotebook(notebook('print("one")', 'FAIL', 'print("three")'));
     const executed: string[] = [];
@@ -263,5 +274,76 @@ describe('runAll', () => {
     expect(result).toEqual({ total: 2, succeeded: 1, failed: 1, skipped: false });
     expect(executed).toEqual(['print("second")']);
     expect(memory.content().match(/<!-- nb-output/g)).toHaveLength(1);
+  });
+
+  it('cancels remaining cells and hooks when the plugin unloads', async () => {
+    const memory = memoryNotebook(notebook('print("first")', 'print("second")'));
+    let release!: () => void;
+    let markStarted!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const started = new Promise<void>((resolve) => { markStarted = resolve; });
+    const executed: string[] = [];
+    const onComplete = jest.fn();
+    const kernel = {
+      executionCount: 0,
+      async execute(source: string) {
+        this.executionCount += 1;
+        executed.push(source);
+        if (executed.length === 1) {
+          markStarted();
+          await gate;
+        }
+      },
+    };
+
+    const running = runAllWithHooks(
+      memory.app,
+      memory.file,
+      () => kernel,
+      DEFAULT_SETTINGS,
+      { onComplete }
+    );
+    await started;
+    disposeRunAll();
+    release();
+    const result = await running;
+
+    expect(result.skipped).toBe(true);
+    expect(executed).toEqual(['print("first")']);
+    expect(onComplete).not.toHaveBeenCalled();
+    expect(memory.content()).not.toContain('<!-- nb-output');
+  });
+
+  it('keeps the same TFile locked if it is renamed during execution', async () => {
+    const memory = memoryNotebook(notebook('print("held")'));
+    let release!: () => void;
+    let markStarted!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const started = new Promise<void>((resolve) => { markStarted = resolve; });
+    let calls = 0;
+    const kernel = {
+      executionCount: 0,
+      async execute() {
+        calls += 1;
+        this.executionCount += 1;
+        markStarted();
+        await gate;
+      },
+    };
+
+    const first = runAllWithHooks(memory.app, memory.file, () => kernel, DEFAULT_SETTINGS);
+    await started;
+    memory.file.path = 'renamed.md';
+    const second = await runAllWithHooks(
+      memory.app,
+      memory.file,
+      () => kernel,
+      DEFAULT_SETTINGS
+    );
+    release();
+    await first;
+
+    expect(second.skipped).toBe(true);
+    expect(calls).toBe(1);
   });
 });

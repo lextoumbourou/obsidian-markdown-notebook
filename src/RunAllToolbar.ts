@@ -20,10 +20,10 @@ export interface RunAllToolbarContext {
 
 const toolbarTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const toolbarElements = new Set<HTMLElement>();
-const toolbarHosts = new Set<HTMLElement>();
 let toolbarEnabled = true;
 let toolbarGeneration = 0;
 let renderSequence = 0;
+let requestSequence = 0;
 
 export function activateRunAllToolbar(): void {
   toolbarEnabled = true;
@@ -41,11 +41,6 @@ export function disposeRunAllToolbar(): void {
   clearRunAllToolbarTimers();
   for (const toolbar of toolbarElements) toolbar.remove();
   toolbarElements.clear();
-  for (const host of toolbarHosts) {
-    delete host.dataset.nbRunAllToolbarPending;
-    delete host.dataset.nbRunAllToolbarRequestedSource;
-  }
-  toolbarHosts.clear();
 }
 
 function removeToolbar(toolbar: HTMLElement | null): void {
@@ -166,8 +161,13 @@ async function renderToolbarInHost(
   generation: number,
 ): Promise<void> {
   if (!toolbarEnabled || generation !== toolbarGeneration) return;
-  toolbarHosts.add(host);
+  const requestVersion = String(++requestSequence);
   host.dataset.nbRunAllToolbarRequestedSource = sourcePath;
+  host.dataset.nbRunAllToolbarRequestVersion = requestVersion;
+  const pendingToken = host.dataset.nbRunAllToolbarPending;
+  if (pendingToken && !pendingToken.startsWith(`${generation}:`)) {
+    delete host.dataset.nbRunAllToolbarPending;
+  }
   if (host.dataset.nbRunAllToolbarPending) return;
 
   const renderToken = `${generation}:${++renderSequence}`;
@@ -218,6 +218,7 @@ async function renderToolbarInHost(
       !toolbarEnabled
       || generation !== toolbarGeneration
       || host.dataset.nbRunAllToolbarRequestedSource !== sourcePath
+      || host.dataset.nbRunAllToolbarRequestVersion !== requestVersion
     ) return;
 
     const blocks = parseRunBlocks(content);
@@ -239,10 +240,15 @@ async function renderToolbarInHost(
       delete host.dataset.nbRunAllToolbarPending;
       if (toolbarEnabled && generation === toolbarGeneration) {
         const requestedSource = host.dataset.nbRunAllToolbarRequestedSource;
-        if (requestedSource && requestedSource !== sourcePath) {
+        const latestRequestVersion = host.dataset.nbRunAllToolbarRequestVersion;
+        if (
+          requestedSource
+          && (requestedSource !== sourcePath || latestRequestVersion !== requestVersion)
+        ) {
           void renderToolbarInHost(host, requestedSource, context, generation);
         } else {
           delete host.dataset.nbRunAllToolbarRequestedSource;
+          delete host.dataset.nbRunAllToolbarRequestVersion;
         }
       }
     }

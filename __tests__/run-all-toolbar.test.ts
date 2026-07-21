@@ -225,6 +225,33 @@ describe('Run All toolbar', () => {
     expect(host.querySelector('.nb-run-all-toolbar')?.dataset.sourcePath).toBe(nextFile.path);
   });
 
+  it('reruns a same-note refresh requested while an earlier read is pending', async () => {
+    const { app, context, ctx } = fixture();
+    let finishFirstRead!: (value: string) => void;
+    let reads = 0;
+    app.vault.read.mockImplementation(() => {
+      reads += 1;
+      if (reads === 1) {
+        return new Promise<string>((resolve) => { finishFirstRead = resolve; });
+      }
+      return Promise.resolve('# All executable cells were removed');
+    });
+    const host = new FakeElement('markdown-preview-sizer');
+    const section = host.createDiv({ cls: 'markdown-preview-section' });
+
+    const firstRender = renderRunAllToolbar(section as unknown as HTMLElement, ctx, context as never);
+    await Promise.resolve();
+    await Promise.resolve();
+    await renderRunAllToolbar(section as unknown as HTMLElement, ctx, context as never);
+    finishFirstRead(notebook('print("stale snapshot")'));
+    await firstRender;
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(reads).toBe(2);
+    expect(host.querySelector('.nb-run-all-toolbar')).toBeNull();
+  });
+
   it('removes toolbars and ignores delayed renders after plugin unload', async () => {
     const { app, context, ctx } = fixture();
     let finishRead!: (value: string) => void;

@@ -45,11 +45,43 @@ export interface RunAllHooks {
   onComplete?: (summary: RunAllSummary) => void;
 }
 
-const runAllInFlight = new Set<string>();
-const runAllProgress = new Map<string, RunAllProgress>();
+interface OwnedProgress {
+  owner: symbol;
+  state: RunAllProgress;
+}
+
+class RunAllCancelledError extends Error {}
+
+const runAllInFlight = new Map<string, symbol>();
+const runAllFilesInFlight = new Map<TFile, symbol>();
+const runAllProgress = new Map<string, OwnedProgress>();
+const activeNotices = new Map<symbol, Notice>();
+let runAllEnabled = true;
+let runAllGeneration = 0;
+
+export function activateRunAll(): void {
+  runAllEnabled = true;
+  runAllGeneration += 1;
+}
+
+export function disposeRunAll(): void {
+  runAllEnabled = false;
+  runAllGeneration += 1;
+  for (const notice of activeNotices.values()) notice.hide();
+  activeNotices.clear();
+  runAllInFlight.clear();
+  runAllFilesInFlight.clear();
+  runAllProgress.clear();
+}
+
+function throwIfRunCancelled(generation: number): void {
+  if (!runAllEnabled || generation !== runAllGeneration) {
+    throw new RunAllCancelledError();
+  }
+}
 
 export function getRunAllProgress(sourcePath: string): RunAllProgress | undefined {
-  return runAllProgress.get(sourcePath);
+  return runAllProgress.get(sourcePath)?.state;
 }
 
 function callHook<K extends keyof RunAllHooks>(
@@ -73,8 +105,10 @@ export async function runAll(
   hooks: RunAllHooks = {}
 ): Promise<RunAllSummary> {
   const sourcePath = file.path;
-  const activeState = runAllProgress.get(sourcePath);
-  if (runAllInFlight.has(sourcePath)) {
+  const activeOwner = runAllFilesInFlight.get(file) ?? runAllInFlight.get(sourcePath);
+  if (activeOwner) {
+    const activeState = [...runAllProgress.values()]
+      .find((progress) => progress.owner === activeOwner)?.state;
     new Notice("Notebook: this file is already running.");
     return {
       total: activeState?.total ?? 0,
@@ -84,14 +118,23 @@ export async function runAll(
     };
   }
 
-  runAllInFlight.add(sourcePath);
+  if (!runAllEnabled) {
+    return { total: 0, succeeded: 0, failed: 0, skipped: true };
+  }
+
+  const owner = Symbol(sourcePath);
+  const generation = runAllGeneration;
+  runAllInFlight.set(sourcePath, owner);
+  runAllFilesInFlight.set(file, owner);
   let total = 0;
   let notice: Notice | null = null;
   const failedCells = new Set<number>();
   let completedCells = 0;
 
   try {
+    throwIfRunCancelled(generation);
     const content = await app.vault.read(file);
+    throwIfRunCancelled(generation);
     const blocks = parseRunBlocks(content);
     const fm = readNotebookFrontmatter(app, file);
     total = blocks.length;
@@ -103,9 +146,14 @@ export async function runAll(
       return emptySummary;
     }
 
-    runAllProgress.set(sourcePath, { running: true, current: 0, total });
+    runAllProgress.set(sourcePath, {
+      owner,
+      state: { running: true, current: 0, total },
+    });
     callHook(hooks, "onStart", { total });
+    throwIfRunCancelled(generation);
     notice = new Notice(`Running cell 1 / ${total}…`, 0);
+    activeNotices.set(owner, notice);
     const results: Array<RunBlock & {
       cellIndex: number;
       hash: string;
@@ -115,15 +163,22 @@ export async function runAll(
     }> = [];
 
     for (let i = 0; i < total; i++) {
+      throwIfRunCancelled(generation);
       const current = i + 1;
-      runAllProgress.set(sourcePath, { running: true, current, total });
+      runAllProgress.set(sourcePath, {
+        owner,
+        state: { running: true, current, total },
+      });
       callHook(hooks, "onProgress", { current, total });
+      throwIfRunCancelled(generation);
       notice.setMessage(`Running cell ${current} / ${total}…`);
       const block = blocks[i];
       let hash: string;
       try {
         hash = await hashCodeFence(block.language, block.source);
+        throwIfRunCancelled(generation);
       } catch (err) {
+        if (err instanceof RunAllCancelledError) throw err;
         failedCells.add(i);
         completedCells += 1;
         const msg = err instanceof Error ? err.message : String(err);
@@ -141,7 +196,11 @@ export async function runAll(
           (chunk) => chunks.push(chunk),
           timeout
         );
+        throwIfRunCancelled(generation);
       } catch (err) {
+        if (!runAllEnabled || generation !== runAllGeneration) {
+          throw new RunAllCancelledError();
+        }
         failure = err instanceof KernelTimeoutError ? "timeout" : "error";
         failedCells.add(i);
         const msg = err instanceof Error ? err.message : String(err);
@@ -166,8 +225,10 @@ export async function runAll(
         const { content: outContent, format } = await resolveOutput(
           app, file, hash, chunks, block.id, block.format, settings, fm
         );
+        throwIfRunCancelled(generation);
         results.push({ ...block, cellIndex: i, hash, content: outContent, format });
       } catch (err) {
+        if (err instanceof RunAllCancelledError) throw err;
         failedCells.add(i);
         const msg = err instanceof Error ? err.message : String(err);
         console.error(`[MarkdownNotebook] Cell ${current} output rendering failed:`, err);
@@ -187,12 +248,14 @@ export async function runAll(
     // Writes re-anchor each cell by content; lineEnd is only the duplicate
     // tie-breaker hint. Reverse order keeps the hints closest to accurate.
     for (const result of [...results].reverse()) {
+      throwIfRunCancelled(generation);
       try {
         const saved = await writeOutputBlock(
           app, file,
           { language: result.language, source: result.source, hintLine: result.lineEnd },
           result.hash, result.content, result.format, result.id, result.status
         );
+        throwIfRunCancelled(generation);
         if (!saved) {
           failedCells.add(result.cellIndex);
           const cellNumber = result.cellIndex + 1;
@@ -201,6 +264,7 @@ export async function runAll(
           );
         }
       } catch (err) {
+        if (err instanceof RunAllCancelledError) throw err;
         failedCells.add(result.cellIndex);
         const cellNumber = result.cellIndex + 1;
         const msg = err instanceof Error ? err.message : String(err);
@@ -209,6 +273,7 @@ export async function runAll(
       }
     }
 
+    throwIfRunCancelled(generation);
     const summary = {
       total,
       succeeded: total - failedCells.size,
@@ -216,6 +281,7 @@ export async function runAll(
       skipped: false,
     };
     notice.hide();
+    activeNotices.delete(owner);
     notice = null;
     new Notice(
       `Ran ${total} cell${total === 1 ? "" : "s"}: ` +
@@ -224,6 +290,15 @@ export async function runAll(
     callHook(hooks, "onComplete", summary);
     return summary;
   } catch (err) {
+    if (err instanceof RunAllCancelledError) {
+      const succeeded = Math.max(0, completedCells - failedCells.size);
+      return {
+        total,
+        succeeded,
+        failed: Math.max(failedCells.size, total - succeeded),
+        skipped: true,
+      };
+    }
     const msg = err instanceof Error ? err.message : String(err);
     console.error("[MarkdownNotebook] Run all failed:", err);
     new Notice(`Notebook: run all failed: ${msg}`);
@@ -238,8 +313,10 @@ export async function runAll(
     return summary;
   } finally {
     notice?.hide();
-    runAllInFlight.delete(sourcePath);
-    runAllProgress.delete(sourcePath);
+    activeNotices.delete(owner);
+    if (runAllInFlight.get(sourcePath) === owner) runAllInFlight.delete(sourcePath);
+    if (runAllFilesInFlight.get(file) === owner) runAllFilesInFlight.delete(file);
+    if (runAllProgress.get(sourcePath)?.owner === owner) runAllProgress.delete(sourcePath);
   }
 }
 
