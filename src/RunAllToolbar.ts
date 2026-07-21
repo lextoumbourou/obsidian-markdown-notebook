@@ -129,10 +129,14 @@ export async function renderRunAllToolbar(
 ): Promise<void> {
   const host = await findToolbarHost(el, ctx.sourcePath, context.app);
   if (!host) return;
+  let toolbar = host.querySelector<HTMLElement>(".nb-run-all-toolbar");
+  if (toolbar && toolbar.dataset.sourcePath !== ctx.sourcePath) {
+    toolbar.remove();
+    toolbar = null;
+  }
   if (host.dataset.nbRunAllToolbarPending === "true") return;
   host.dataset.nbRunAllToolbarPending = "true";
 
-  let toolbar = host.querySelector<HTMLElement>(".nb-run-all-toolbar");
   try {
     const file = context.app.vault.getAbstractFileByPath(ctx.sourcePath);
     if (!isMarkdownFile(file)) return;
