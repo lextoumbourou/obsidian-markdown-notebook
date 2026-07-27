@@ -42,6 +42,19 @@ export async function writeOutputBlock(
   return cellExists;
 }
 
+/** Check that a cell still exists before performing a related side-effect. */
+export async function outputCellExists(
+  app: App,
+  file: TFile,
+  cell: CellLocator,
+  assertActive: () => void = () => undefined
+): Promise<boolean> {
+  assertActive();
+  const raw = await app.vault.read(file);
+  assertActive();
+  return findCellFenceEnd(raw.split(/\r?\n/), cell) !== null;
+}
+
 /**
  * Clear an nb-output block from the file on disk.
  */

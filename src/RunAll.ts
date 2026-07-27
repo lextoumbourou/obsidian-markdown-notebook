@@ -3,6 +3,7 @@ import { hashCodeFence } from "./HashUtils";
 import { parseRunBlocks, RunBlock } from "./CellParser";
 import {
   writeOutputBlock,
+  outputCellExists,
   saveImageToVault,
   imageLink,
   OutputFormat,
@@ -225,6 +226,20 @@ export async function runAll(
       }
 
       try {
+        const cellStillExists = await outputCellExists(
+          app,
+          file,
+          { language: block.language, source: block.source, hintLine: block.lineEnd },
+          () => throwIfRunCancelled(generation),
+        );
+        if (!cellStillExists) {
+          failedCells.add(i);
+          completedCells += 1;
+          new Notice(
+            `Notebook: cell ${current} changed before its output could be prepared.`
+          );
+          continue;
+        }
         const { content: outContent, format } = await resolveOutput(
           app, file, hash, chunks, block.id, block.format, settings, fm,
           () => throwIfRunCancelled(generation)

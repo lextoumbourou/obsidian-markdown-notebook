@@ -447,4 +447,26 @@ describe('runAll', () => {
     expect(memory.app.vault.createBinary).not.toHaveBeenCalled();
     expect(memory.app.vault.process).not.toHaveBeenCalled();
   });
+
+  it('does not save an image when the cell was edited during execution', async () => {
+    const memory = memoryNotebook('```python {format=image}\nprint("plot")\n```');
+    const kernel = {
+      executionCount: 0,
+      async execute(_source: string, onChunk: (chunk: unknown) => void) {
+        this.executionCount += 1;
+        onChunk({ type: 'rich', mime: 'image/png', data: 'aGVsbG8=' });
+        memory.setContent('# Cell removed while execution was running');
+      },
+    };
+
+    const result = await runAllWithHooks(
+      memory.app,
+      memory.file,
+      () => kernel,
+      DEFAULT_SETTINGS
+    );
+
+    expect(result).toEqual({ total: 1, succeeded: 0, failed: 1, skipped: false });
+    expect(memory.app.vault.createBinary).not.toHaveBeenCalled();
+  });
 });
