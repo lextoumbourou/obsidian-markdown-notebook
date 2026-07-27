@@ -15,6 +15,7 @@ import {
   disposeRunAllToolbar,
   renderRunAllToolbar,
   runAllToolbarHooks,
+  setRunAllToolbarVisible,
 } from "./RunAllToolbar";
 
 type AnyKernel = BaseKernel | ShellKernel;
@@ -22,6 +23,7 @@ type AnyKernel = BaseKernel | ShellKernel;
 export default class MarkdownNotebookPlugin extends Plugin {
   settings: PluginSettings;
   private kernels: Map<string, AnyKernel> = new Map();
+  private runButtonContext?: RunButtonContext;
 
   async onload() {
     activateRunAll();
@@ -34,6 +36,8 @@ export default class MarkdownNotebookPlugin extends Plugin {
       getSettings: () => this.settings,
       getKernel: (lang: string) => this.getKernel(lang),
     };
+    this.runButtonContext = context;
+    void setRunAllToolbarVisible(this.settings.showRunAllToolbar, context);
 
     // Register a processor for each language + its common aliases
     const registered = new Set<string>();
@@ -162,5 +166,11 @@ export default class MarkdownNotebookPlugin extends Plugin {
 
   async saveSettings() {
     await this.saveData(this.settings);
+  }
+
+  async updateRunAllToolbarVisibility(visible: boolean): Promise<void> {
+    if (this.runButtonContext) {
+      await setRunAllToolbarVisible(visible, this.runButtonContext);
+    }
   }
 }

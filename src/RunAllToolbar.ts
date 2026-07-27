@@ -21,6 +21,7 @@ export interface RunAllToolbarContext {
 const toolbarTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const toolbarElements = new Set<HTMLElement>();
 let toolbarEnabled = true;
+let toolbarVisible = true;
 let toolbarGeneration = 0;
 let renderSequence = 0;
 let requestSequence = 0;
@@ -120,6 +121,33 @@ function findToolbarHostsInWorkspace(app: App, sourcePath: string): HTMLElement[
   return [...hosts];
 }
 
+export async function setRunAllToolbarVisible(
+  visible: boolean,
+  context: RunAllToolbarContext,
+): Promise<void> {
+  toolbarVisible = visible;
+  clearRunAllToolbarTimers();
+  if (!visible) {
+    for (const toolbar of toolbarElements) toolbar.remove();
+    toolbarElements.clear();
+    return;
+  }
+
+  const sourcePaths = new Set<string>();
+  for (const leaf of context.app.workspace?.getLeavesOfType?.("markdown") ?? []) {
+    const view = leaf.view as unknown as MarkdownViewLike;
+    if (typeof view.file?.path === "string") sourcePaths.add(view.file.path);
+  }
+  const generation = toolbarGeneration;
+  await Promise.all(
+    [...sourcePaths].flatMap((sourcePath) =>
+      findToolbarHostsInWorkspace(context.app, sourcePath).map((host) =>
+        renderToolbarInHost(host, sourcePath, context, generation)
+      )
+    )
+  );
+}
+
 function waitForRenderTurn(): Promise<void> {
   return new Promise((resolve) => {
     if (typeof requestAnimationFrame === "function") {
@@ -137,7 +165,7 @@ async function findToolbarHost(
   generation: number,
 ): Promise<HTMLElement | null> {
   for (let attempt = 0; attempt < 20; attempt++) {
-    if (!toolbarEnabled || generation !== toolbarGeneration) return null;
+    if (!toolbarEnabled || !toolbarVisible || generation !== toolbarGeneration) return null;
     const directHost = el.closest<HTMLElement>(".markdown-preview-view")
       ?? el.closest<HTMLElement>(".markdown-preview-sizer");
     const workspaceHost = findToolbarHostsInWorkspace(app, sourcePath)[0];
@@ -160,7 +188,7 @@ async function renderToolbarInHost(
   context: RunAllToolbarContext,
   generation: number,
 ): Promise<void> {
-  if (!toolbarEnabled || generation !== toolbarGeneration) return;
+  if (!toolbarEnabled || !toolbarVisible || generation !== toolbarGeneration) return;
   const requestVersion = String(++requestSequence);
   host.dataset.nbRunAllToolbarRequestedSource = sourcePath;
   host.dataset.nbRunAllToolbarRequestVersion = requestVersion;
@@ -261,7 +289,7 @@ export async function renderRunAllToolbar(
   context: RunAllToolbarContext,
 ): Promise<void> {
   const generation = toolbarGeneration;
-  if (!toolbarEnabled) return;
+  if (!toolbarEnabled || !toolbarVisible) return;
   const host = await findToolbarHost(el, ctx.sourcePath, context.app, generation);
   if (!host) return;
   await renderToolbarInHost(host, ctx.sourcePath, context, generation);
@@ -272,7 +300,7 @@ export function scheduleRunAllToolbarRender(
   context: RunAllToolbarContext,
   delay = 200,
 ): void {
-  if (!toolbarEnabled) return;
+  if (!toolbarEnabled || !toolbarVisible) return;
   const sourcePath = ctx.sourcePath;
   const generation = toolbarGeneration;
   const existing = toolbarTimers.get(sourcePath);
@@ -280,7 +308,7 @@ export function scheduleRunAllToolbarRender(
 
   const timer = setTimeout(() => {
     toolbarTimers.delete(sourcePath);
-    if (!toolbarEnabled || generation !== toolbarGeneration) return;
+    if (!toolbarEnabled || !toolbarVisible || generation !== toolbarGeneration) return;
     for (const host of findToolbarHostsInWorkspace(context.app, sourcePath)) {
       void renderToolbarInHost(host, sourcePath, context, generation);
     }

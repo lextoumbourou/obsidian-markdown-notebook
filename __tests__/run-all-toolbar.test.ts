@@ -6,6 +6,7 @@ import {
   renderRunAllToolbar,
   runAllToolbarHooks,
   scheduleRunAllToolbarRender,
+  setRunAllToolbarVisible,
 } from '../src/RunAllToolbar';
 import { DEFAULT_SETTINGS } from '../src/settings/Settings';
 
@@ -174,6 +175,20 @@ describe('Run All toolbar', () => {
     await renderRunAllToolbar(section as unknown as HTMLElement, ctx, context as never);
 
     expect(host.querySelector('.nb-run-all-toolbar')).toBeNull();
+  });
+
+  it('removes and suppresses toolbars when disabled in settings', async () => {
+    const { context, ctx } = fixture();
+    const host = new FakeElement('markdown-preview-sizer');
+    const section = host.createDiv({ cls: 'markdown-preview-section' });
+    await renderRunAllToolbar(section as unknown as HTMLElement, ctx, context as never);
+    expect(host.querySelector('.nb-run-all-toolbar')).not.toBeNull();
+
+    await setRunAllToolbarVisible(false, context as never);
+    await renderRunAllToolbar(section as unknown as HTMLElement, ctx, context as never);
+
+    expect(host.querySelector('.nb-run-all-toolbar')).toBeNull();
+    await setRunAllToolbarVisible(true, context as never);
   });
 
   it('replaces a toolbar when the preview container is reused for another note', async () => {
