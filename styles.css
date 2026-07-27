@@ -180,3 +180,42 @@
   color: var(--color-yellow);
   margin-bottom: 4px;
 }
+
+/* Notebook-level controls shown at the top of rendered Markdown notes. */
+.nb-run-all-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 1rem 0;
+  padding: 8px 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-secondary);
+}
+
+.nb-run-all-button {
+  flex: 0 0 auto;
+  padding: 5px 10px;
+  border: 1px solid var(--interactive-accent);
+  border-radius: var(--button-radius);
+  color: var(--text-on-accent);
+  background: var(--interactive-accent);
+  font-size: var(--font-smallest);
+  font-weight: var(--font-semibold);
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.nb-run-all-button:hover:not(:disabled) {
+  background: var(--interactive-accent-hover);
+}
+
+.nb-run-all-button:disabled {
+  opacity: 0.65;
+  cursor: progress;
+}
+
+.nb-run-all-status {
+  color: var(--text-muted);
+  font-size: var(--font-smaller);
+}

@@ -161,8 +161,11 @@ describe('writeOutputBlock', () => {
     const mock = makeVaultMock(initial);
     const file = makeFile('note', '');
 
-    await writeOutputBlock(mock as never, file, pyCell('x = 1', 2), 'abc12345', '<div>out</div>', 'html');
+    const written = await writeOutputBlock(
+      mock as never, file, pyCell('x = 1', 2), 'abc12345', '<div>out</div>', 'html'
+    );
 
+    expect(written).toBe(true);
     expect(mock.content).toContain('<!-- nb-output hash="abc12345" format="html" -->');
     expect(mock.content).toContain('<div>out</div>');
     expect(mock.content).toContain('<!-- /nb-output -->');
@@ -266,8 +269,11 @@ describe('writeOutputBlock', () => {
     const mock = makeVaultMock(initial);
     const file = makeFile('note', '');
 
-    await writeOutputBlock(mock as never, file, pyCell('print("original")', 2), 'abc', '<div>x</div>', 'html');
+    const written = await writeOutputBlock(
+      mock as never, file, pyCell('print("original")', 2), 'abc', '<div>x</div>', 'html'
+    );
 
+    expect(written).toBe(false);
     expect(mock.content).toBe(initial);
   });
 

@@ -13,6 +13,23 @@ export class SettingsTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
 
+    // ── Interface ────────────────────────────────────────────────────────────
+
+    containerEl.createEl("h3", { text: "Interface" });
+
+    new Setting(containerEl)
+      .setName("Show Run all toolbar")
+      .setDesc("Show notebook-wide execution controls at the top of Reading View")
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.showRunAllToolbar)
+          .onChange(async (value) => {
+            this.plugin.settings.showRunAllToolbar = value;
+            await this.plugin.saveSettings();
+            await this.plugin.updateRunAllToolbarVisibility(value);
+          })
+      );
+
     // ── Execution ────────────────────────────────────────────────────────────
 
     containerEl.createEl("h3", { text: "Execution" });

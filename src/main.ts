@@ -7,17 +7,27 @@ import { ShellKernel } from "./kernels/ShellKernel";
 import { RKernel } from "./kernels/RKernel";
 import { BaseKernel } from "./kernels/BaseKernel";
 import { processCodeBlock, RunButtonContext, isCellInFlight } from "./RunButton";
-import { runAll } from "./RunAll";
+import { activateRunAll, disposeRunAll, runAll } from "./RunAll";
 import { clearStaleRunningBlocks } from "./OutputBlock";
 import { SUPPORTED_LANGUAGES, LANG_ALIASES } from "./languages";
+import {
+  activateRunAllToolbar,
+  disposeRunAllToolbar,
+  renderRunAllToolbar,
+  runAllToolbarHooks,
+  setRunAllToolbarVisible,
+} from "./RunAllToolbar";
 
 type AnyKernel = BaseKernel | ShellKernel;
 
 export default class MarkdownNotebookPlugin extends Plugin {
   settings: PluginSettings;
   private kernels: Map<string, AnyKernel> = new Map();
+  private runButtonContext?: RunButtonContext;
 
   async onload() {
+    activateRunAll();
+    activateRunAllToolbar();
     await this.loadSettings();
     this.addSettingTab(new SettingsTab(this.app, this));
 
@@ -26,6 +36,8 @@ export default class MarkdownNotebookPlugin extends Plugin {
       getSettings: () => this.settings,
       getKernel: (lang: string) => this.getKernel(lang),
     };
+    this.runButtonContext = context;
+    void setRunAllToolbarVisible(this.settings.showRunAllToolbar, context);
 
     // Register a processor for each language + its common aliases
     const registered = new Set<string>();
@@ -51,6 +63,10 @@ export default class MarkdownNotebookPlugin extends Plugin {
         0  // persist until dismissed
       );
     }
+
+    this.registerMarkdownPostProcessor((el, ctx) => {
+      void renderRunAllToolbar(el, ctx, context);
+    });
 
     // A `status="running"` spinner block survives in the file if Obsidian
     // quit (or the plugin reloaded) mid-execution — repair it on file open.
@@ -92,12 +108,20 @@ export default class MarkdownNotebookPlugin extends Plugin {
           new Notice("No active Markdown file.");
           return;
         }
-        runAll(this.app, file, (lang) => this.getKernel(lang), this.settings);
+        void runAll(
+          this.app,
+          file,
+          (lang) => this.getKernel(lang),
+          this.settings,
+          runAllToolbarHooks(file.path),
+        );
       },
     });
   }
 
   onunload() {
+    disposeRunAll();
+    disposeRunAllToolbar();
     for (const k of this.kernels.values()) k.stop();
   }
 
@@ -142,5 +166,11 @@ export default class MarkdownNotebookPlugin extends Plugin {
 
   async saveSettings() {
     await this.saveData(this.settings);
+  }
+
+  async updateRunAllToolbarVisibility(visible: boolean): Promise<void> {
+    if (this.runButtonContext) {
+      await setRunAllToolbarVisible(visible, this.runButtonContext);
+    }
   }
 }

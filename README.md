@@ -78,6 +78,8 @@ Optional but recommended for rich output:
 
 Click **▶ Run** on any supported language block in reading view. The `[N]` badge to the left of the button shows how many cells have executed since the kernel started.
 
+For notebook-wide execution, click **▶ Run all cells** at the top of the reading view. The toolbar reports the cell count and live progress while cells run in document order. The same action remains available from the command palette as **Markdown Notebook: Run all cells**.
+
 ### Output formats
 
 Two formats are supported, controlled with the `format` argument:
