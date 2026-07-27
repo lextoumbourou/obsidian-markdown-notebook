@@ -78,7 +78,7 @@ Optional but recommended for rich output:
 
 Click **▶ Run** on any supported language block in reading view. The `[N]` badge to the left of the button shows how many cells have executed since the kernel started.
 
-For notebook-wide execution, click **▶ Run all cells** at the top of the reading view. The toolbar reports the cell count and live progress while cells run in document order. The same action remains available from the command palette as **Markdown Notebook: Run all cells**.
+For notebook-wide execution, click **▶ Run all cells** at the top of the reading view. The toolbar reports the cell count and live progress while cells run in document order. Run all stops after the first error or timeout by default; disable **Stop on first error** in plugin settings to continue through independent cells. The same action remains available from the command palette as **Markdown Notebook: Run all cells**.
 
 ### Output formats
 
@@ -146,6 +146,8 @@ Cell-level args override frontmatter, which overrides plugin settings:
 
 | Setting | Default | Description |
 |---|---|---|
+| Show Run all toolbar | on | Show notebook-wide execution controls at the top of Reading View |
+| Stop on first error | on | Stop Run all after the first failed or timed-out cell |
 | Execution timeout | `30000` | Maximum execution time per cell (ms) |
 | Python path | `python3` | Path to the Python executable |
 | Node.js path | `node` | Path to the Node.js executable |

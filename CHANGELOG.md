@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.3.0] - Unreleased
+
+### Added
+- Reading View toolbar for running every executable cell in a note, with cell count, live progress, and support for multiple panes and popout windows
+- Settings to hide the Run all toolbar and to continue running later cells after an error
+- Jupyter-style Run all behaviour: execution now stops after the first error or timeout by default, while preserving outputs from earlier cells and the failed cell
+
+### Fixed
+- Run all no longer saves or overwrites an image attachment when its source cell was edited or deleted during execution
+
 ## [0.2.0] - 2026-06-10
 
 ### Added

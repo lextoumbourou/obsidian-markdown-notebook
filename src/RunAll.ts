@@ -135,6 +135,7 @@ export async function runAll(
   let notice: Notice | null = null;
   const failedCells = new Set<number>();
   let completedCells = 0;
+  let stoppedAt: number | null = null;
 
   try {
     throwIfRunCancelled(generation);
@@ -222,6 +223,10 @@ export async function runAll(
           status: failure,
         });
         completedCells += 1;
+        if (settings.stopOnFirstError) {
+          stoppedAt = current;
+          break;
+        }
         continue;
       }
 
@@ -298,17 +303,26 @@ export async function runAll(
     throwIfRunCancelled(generation);
     const summary = {
       total,
-      succeeded: total - failedCells.size,
+      succeeded: Math.max(0, completedCells - failedCells.size),
       failed: failedCells.size,
       skipped: false,
     };
     notice.hide();
     activeNotices.delete(owner);
     notice = null;
-    new Notice(
-      `Ran ${total} cell${total === 1 ? "" : "s"}: ` +
-      `${summary.succeeded} succeeded, ${summary.failed} failed.`
-    );
+    if (stoppedAt !== null) {
+      const notRun = Math.max(0, total - completedCells);
+      new Notice(
+        `Stopped at cell ${stoppedAt} after an error: ` +
+        `${summary.succeeded} succeeded, ${summary.failed} failed` +
+        `${notRun > 0 ? `, ${notRun} not run` : ""}.`
+      );
+    } else {
+      new Notice(
+        `Ran ${total} cell${total === 1 ? "" : "s"}: ` +
+        `${summary.succeeded} succeeded, ${summary.failed} failed.`
+      );
+    }
     callHook(hooks, "onComplete", summary);
     return summary;
   } catch (err) {

@@ -178,7 +178,36 @@ describe('runAll', () => {
   beforeEach(() => activateRunAll());
   afterEach(() => disposeRunAll());
 
-  it('continues after a failed cell and reports progress and totals', async () => {
+  it('continues after a failed cell when stop on first error is disabled', async () => {
+    const memory = memoryNotebook(notebook('print("one")', 'FAIL', 'print("three")'));
+    const executed: string[] = [];
+    const progress: number[] = [];
+    const kernel = {
+      executionCount: 0,
+      async execute(source: string, onChunk: (chunk: unknown) => void) {
+        this.executionCount += 1;
+        executed.push(source);
+        if (source === 'FAIL') throw new Error('expected failure');
+        onChunk({ type: 'stream', stream: 'stdout', text: `${source}\n` });
+      },
+    };
+
+    const result = await runAllWithHooks(
+      memory.app,
+      memory.file,
+      () => kernel,
+      { ...DEFAULT_SETTINGS, stopOnFirstError: false },
+      { onProgress: ({ current }) => progress.push(current) }
+    );
+
+    expect(result).toEqual({ total: 3, succeeded: 2, failed: 1, skipped: false });
+    expect(executed).toEqual(['print("one")', 'FAIL', 'print("three")']);
+    expect(progress).toEqual([1, 2, 3]);
+    expect(memory.content().match(/<!-- nb-output/g)).toHaveLength(3);
+    expect(memory.content()).toContain('status="error"');
+  });
+
+  it('stops after the first failed cell by default', async () => {
     const memory = memoryNotebook(notebook('print("one")', 'FAIL', 'print("three")'));
     const executed: string[] = [];
     const progress: number[] = [];
@@ -200,10 +229,10 @@ describe('runAll', () => {
       { onProgress: ({ current }) => progress.push(current) }
     );
 
-    expect(result).toEqual({ total: 3, succeeded: 2, failed: 1, skipped: false });
-    expect(executed).toEqual(['print("one")', 'FAIL', 'print("three")']);
-    expect(progress).toEqual([1, 2, 3]);
-    expect(memory.content().match(/<!-- nb-output/g)).toHaveLength(3);
+    expect(result).toEqual({ total: 3, succeeded: 1, failed: 1, skipped: false });
+    expect(executed).toEqual(['print("one")', 'FAIL']);
+    expect(progress).toEqual([1, 2]);
+    expect(memory.content().match(/<!-- nb-output/g)).toHaveLength(2);
     expect(memory.content()).toContain('status="error"');
   });
 

@@ -35,6 +35,18 @@ export class SettingsTab extends PluginSettingTab {
     containerEl.createEl("h3", { text: "Execution" });
 
     new Setting(containerEl)
+      .setName("Stop on first error")
+      .setDesc("Stop Run all after the first failed or timed-out cell, like Jupyter")
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.stopOnFirstError)
+          .onChange(async (value) => {
+            this.plugin.settings.stopOnFirstError = value;
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(containerEl)
       .setName("Execution timeout (ms)")
       .setDesc("Maximum time to wait for a cell to finish executing")
       .addText((text) =>
