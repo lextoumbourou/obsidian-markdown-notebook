@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.3.0] - Unreleased
+## [0.3.0] - 2026-07-28
 
 ### Added
 - Reading View toolbar for running every executable cell in a note, with cell count, live progress, and support for multiple panes and popout windows
