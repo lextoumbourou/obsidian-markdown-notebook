@@ -1,6 +1,6 @@
 {
   "name": "obsidian-markdown-notebook",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Jupyter-style notebook execution with outputs stored as HTML in Markdown files",
   "main": "main.js",
   "bin": {

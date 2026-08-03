@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.4.0] - 2026-08-04
 
 ### Added
 - **Run all cells above cursor** and **Run cell and all cells below cursor** editor commands for rebuilding or continuing shared notebook state without running the entire note
