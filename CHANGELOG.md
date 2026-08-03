@@ -4,6 +4,21 @@
 
 ### Added
 - Active **Run** and **Run all cells** buttons now become red **Stop** buttons, allowing the current cell or notebook-wide run to be interrupted without executing queued cells
+- Notebook-scoped kernel sessions: persistent Python, Node.js, and R state is shared within a note but isolated between notes, along with execution counts and runtime configuration
+- Kernels now use the note's folder as their working directory, making relative file access predictable; `notebook.cwd` can select a note-relative directory, an absolute path, or the vault root with `/`/`vault`
+- Per-note `notebook.python`, `notebook.node`, `notebook.shell`, and `notebook.r` executable overrides, with relative executable paths resolved from the note's folder
+
+### Changed
+- **Interrupt kernel** now targets kernels belonging to the active note; **Restart all kernels** and plugin unload clean up every notebook-scoped session
+- The `nb-run` CLI now starts kernels in the note's folder and respects the new working-directory and executable frontmatter fields
+- Notebook sessions are shut down when their last Markdown leaf closes and when their note is renamed or deleted, bounding the number of persistent subprocesses
+- Relative executable paths in global plugin settings resolve from the vault root; relative frontmatter executable paths remain note-relative
+
+### Fixed
+- `nb-run` now gives `notebook.cwd: /` and `notebook.cwd: vault` the same vault-root meaning as the plugin, discovering the nearest `.obsidian` directory or requiring `--vault-root` instead of silently running from the filesystem root or a nonexistent `vault` subfolder
+- Rendering a code block or execution-count badge no longer creates, replaces, or throws from kernel acquisition, so Canvas, exports, and third-party Markdown rendering can display cells without a resolvable source file
+- Replacing or shutting down an active Python, Node.js, R, or shell kernel now settles the cell immediately as cancelled instead of leaving it stuck until its execution timeout
+- Run All snapshots one kernel per language before execution, so frontmatter edits cannot replace a session and discard state midway through the run
 
 ## [0.3.0] - 2026-07-28
 

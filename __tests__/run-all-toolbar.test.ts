@@ -100,7 +100,7 @@ function fixture(markdown = notebook('print("one")')) {
   };
   const context = {
     app,
-    getKernel: () => ({ executionCount: 0, execute: jest.fn(async () => undefined) }),
+    acquireKernel: () => ({ executionCount: 0, execute: jest.fn(async () => undefined) }),
     getSettings: () => DEFAULT_SETTINGS,
   };
   const ctx = { sourcePath: file.path } as MarkdownPostProcessorContext;

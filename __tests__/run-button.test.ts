@@ -75,6 +75,41 @@ class FakeElement {
 describe('Run button', () => {
   afterEach(() => clearRunAllToolbarTimers());
 
+  it('renders with a zero badge without acquiring a kernel', async () => {
+    const acquireKernel = jest.fn(() => { throw new Error('No backing note'); });
+    const context = {
+      app: {
+        workspace: { getLeavesOfType: jest.fn(() => []) },
+        vault: { getAbstractFileByPath: jest.fn(() => null) },
+      },
+      getSettings: () => DEFAULT_SETTINGS,
+      acquireKernel,
+      peekExecutionCount: () => 0,
+    };
+    const ctx = {
+      sourcePath: '',
+      getSectionInfo: () => null,
+    } as unknown as MarkdownPostProcessorContext;
+    Object.assign(globalThis, { window: {}, HTMLPreElement: FakeElement });
+    const root = new FakeElement();
+
+    await expect(processCodeBlock(
+      'print("render only")',
+      root as unknown as HTMLElement,
+      ctx,
+      context as never,
+      'python',
+    )).resolves.toBeUndefined();
+
+    expect(root.querySelector('.nb-run-button')).not.toBeNull();
+    expect(root.querySelector('.nb-exec-count')?.textContent).toBe('[0]');
+    expect(acquireKernel).not.toHaveBeenCalled();
+
+    await expect(root.querySelector('.nb-run-button')!.click()).resolves.toBeUndefined();
+    expect(acquireKernel).toHaveBeenCalledTimes(1);
+    expect(root.querySelector('.nb-run-button')?.textContent).toBe('▶ Run');
+  });
+
   it('keeps Stop available after a re-render and writes an interrupted state', async () => {
     const source = 'while True: pass';
     let markdown = `\`\`\`python\n${source}\n\`\`\``;
@@ -109,7 +144,8 @@ describe('Run button', () => {
     const context = {
       app,
       getSettings: () => DEFAULT_SETTINGS,
-      getKernel: () => kernel,
+      acquireKernel: () => kernel,
+      peekExecutionCount: () => kernel.executionCount,
     };
     const ctx = {
       sourcePath: file.path,

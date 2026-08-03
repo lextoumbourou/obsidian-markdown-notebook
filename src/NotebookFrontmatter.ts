@@ -6,6 +6,11 @@ export interface NotebookFrontmatter {
   media?: string;
   timeout?: number;
   markdownLinks?: boolean;
+  cwd?: string;
+  python?: string;
+  node?: string;
+  shell?: string;
+  r?: string;
 }
 
 export function readNotebookFrontmatter(app: App, file: TFile): NotebookFrontmatter {
@@ -16,5 +21,10 @@ export function readNotebookFrontmatter(app: App, file: TFile): NotebookFrontmat
     media: typeof fm.media === "string" ? fm.media : undefined,
     timeout: typeof fm.timeout === "number" ? fm.timeout : undefined,
     markdownLinks: typeof fm.markdownLinks === "boolean" ? fm.markdownLinks : undefined,
+    cwd: typeof fm.cwd === "string" ? fm.cwd : undefined,
+    python: typeof fm.python === "string" ? fm.python : undefined,
+    node: typeof fm.node === "string" ? fm.node : undefined,
+    shell: typeof fm.shell === "string" ? fm.shell : undefined,
+    r: typeof fm.r === "string" ? fm.r : undefined,
   };
 }

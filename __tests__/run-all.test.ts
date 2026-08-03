@@ -179,6 +179,20 @@ describe('runAll', () => {
   beforeEach(() => activateRunAll());
   afterEach(() => disposeRunAll());
 
+  it('acquires each language kernel once before executing cells', async () => {
+    const memory = memoryNotebook(notebook('x = 1', 'print(x)'));
+    const kernel = {
+      executionCount: 0,
+      execute: jest.fn(async () => undefined),
+    };
+    const acquire = jest.fn(() => kernel);
+
+    await runAllWithHooks(memory.app, memory.file, acquire, DEFAULT_SETTINGS);
+
+    expect(acquire).toHaveBeenCalledTimes(1);
+    expect(kernel.execute).toHaveBeenCalledTimes(2);
+  });
+
   it('continues after a failed cell when stop on first error is disabled', async () => {
     const memory = memoryNotebook(notebook('print("one")', 'FAIL', 'print("three")'));
     const executed: string[] = [];

@@ -44,7 +44,8 @@ Comment markers are invisible in all standard Markdown renderers — including P
 - **Rich output rendering** — HTML tables, matplotlib plots, plain text, and saved images
 - **Execution count** — `[N]` badge on each run button, Jupyter-style, resets on kernel restart
 - **Run All** — execute every cell in the note in order with a single command
-- **Shared kernel state** — variables defined in one cell are available in subsequent cells
+- **Notebook-scoped kernel state** — variables are shared between cells in one note but isolated from other notes
+- **Predictable relative paths** — every kernel starts in the note's folder, so `data.csv` and other relative paths work naturally
 - **Robust failure handling** — distinct ⏱ timeout state, runaway cells are interrupted on timeout, and output blocks left mid-run by a crash are repaired on next open
 - **Headless runner** — the `nb-run` CLI executes cells and updates outputs without Obsidian (publish pipelines, CI)
 - **Export-friendly** — outputs render correctly in Pelican, PDF, and any HTML-aware renderer
@@ -127,6 +128,8 @@ notebook:
   media: attachments  # image save folder, relative to vault root
   timeout: 60000      # execution timeout in ms
   markdownLinks: true # use ![](path) instead of ![[file]] for images
+  cwd: /              # optional: use vault root instead of the note folder
+  python: .venv/bin/python # optional per-note Python executable
 ---
 ```
 
@@ -134,13 +137,19 @@ Cell-level args override frontmatter, which overrides plugin settings:
 
 > plugin settings → frontmatter → cell args
 
+By default, Python, Node.js, Bash, and R execute with the note's folder as their working directory. Set `cwd: /` (or `cwd: vault`) to use the vault root. Any other relative `cwd` is resolved from the note's folder; absolute filesystem paths are also supported.
+
+The `python`, `node`, `shell`, and `r` frontmatter keys override their corresponding global executable settings for that note. Frontmatter executable paths containing a directory component, such as `.venv/bin/python`, are resolved from the note's folder. Relative paths in the global executable settings are resolved from the vault root, while plain command names such as `python3` continue to use `PATH`.
+
+Each note has its own persistent language kernels. State is shared between cells in that note, while variables, working directories, execution counts, and per-note environments do not leak into other notes. A note's kernels are shut down when its last Markdown tab or split closes, or when the note is renamed or deleted; reopening it starts a fresh session.
+
 ### Commands
 
 | Command | Description |
 |---|---|
 | Markdown Notebook: Run all cells | Execute every supported code block in the active note, top to bottom |
-| Markdown Notebook: Restart all kernels | Kill and restart every language kernel, clearing all variables |
-| Markdown Notebook: Interrupt kernel | Send SIGINT to a running cell |
+| Markdown Notebook: Restart all kernels | Kill every notebook-scoped language kernel, clearing all variables |
+| Markdown Notebook: Interrupt kernel | Send SIGINT to kernels belonging to the active note |
 
 ### Settings
 
@@ -235,11 +244,14 @@ node cli.js Note.md --cell 3            # run cells 1..3 (shared kernel state)
 node cli.js Note.md --cell 3 --only     # run just cell 3 (fresh kernel)
 node cli.js Note.md --id revenue-chart  # run up to the cell with this id
 node cli.js Note.md --write             # run all cells, update output blocks in place
+node cli.js Note.md --vault-root Vault  # explicit root for notebook.cwd: /
 ```
 
-Because each invocation starts fresh kernels, targeting a cell runs every cell *up to and including* it by default (Jupyter's "run up to here"), so earlier cells' variables are available; `--only` skips the prelude. Interpreter paths default to `python3`/`node`/`bash`/`R` and can be overridden with `--python`, `--node`, `--shell`, `--r`. Frontmatter `notebook:` defaults (timeout, format, media, markdownLinks) are respected.
+Because each invocation starts fresh kernels, targeting a cell runs every cell *up to and including* it by default (Jupyter's "run up to here"), so earlier cells' variables are available; `--only` skips the prelude. Interpreter paths default to `python3`/`node`/`bash`/`R` and can be overridden with `--python`, `--node`, `--shell`, `--r`. Frontmatter `notebook:` defaults, including `cwd` and per-language executable paths, are respected.
 
-Two differences from the plugin: `format=image` only saves native images (matplotlib/R PNGs) — the browser HTML-to-PNG fallback needs a DOM and degrades to `format=html`; and the media folder is resolved relative to the note's directory, since the CLI has no vault root.
+The CLI uses the same `cwd` rules as the plugin. For `cwd: /` or `cwd: vault`, it searches upward from the note for the nearest `.obsidian` directory. If the note is outside a vault copy, pass `--vault-root <dir>`; the CLI fails clearly rather than interpreting `/` as the filesystem root. Relative frontmatter executable paths resolve from the note, while relative command-line executable paths resolve from the shell's current directory.
+
+Two differences from the plugin remain: `format=image` only saves native images (matplotlib/R PNGs) — the browser HTML-to-PNG fallback needs a DOM and degrades to `format=html`; and the media folder is resolved relative to the note's directory.
 
 ## Similar Projects
 

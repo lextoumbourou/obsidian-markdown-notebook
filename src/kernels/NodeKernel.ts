@@ -61,18 +61,20 @@ process.stdin.on('data', data => {
 
 export class NodeKernel extends BaseKernel {
   private nodePath: string;
+  private cwd?: string;
   private setupFile: string | null = null;
 
-  constructor(nodePath: string) {
+  constructor(nodePath: string, cwd?: string) {
     super();
     this.nodePath = nodePath;
+    this.cwd = cwd;
   }
 
   protected async start(): Promise<void> {
     this.setupFile = path.join(os.tmpdir(), `nb_node_${Date.now()}.js`);
     await fs.promises.writeFile(this.setupFile, SETUP_SCRIPT, "utf8");
 
-    this.process = spawn(this.nodePath, [this.setupFile], { env: kernelEnv() });
+    this.process = spawn(this.nodePath, [this.setupFile], { env: kernelEnv(), cwd: this.cwd });
     this.process.on("close", () => { this.process = null; this.starting = null; });
     this.process.on("error", (err) => {
       console.error("[MarkdownNotebook] Node error:", err);

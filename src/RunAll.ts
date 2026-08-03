@@ -210,6 +210,16 @@ export async function runAll(
       return emptySummary;
     }
 
+    // Resolve one session per language before execution starts. Frontmatter
+    // edits during Run All therefore cannot replace a live kernel halfway
+    // through the notebook and silently discard its state.
+    const kernels = new Map<string, AnyKernel>();
+    for (const block of blocks) {
+      if (!kernels.has(block.language)) {
+        kernels.set(block.language, getKernel(block.language));
+      }
+    }
+
     runAllProgress.set(sourcePath, {
       owner,
       state: { running: true, current: 0, total },
@@ -248,7 +258,7 @@ export async function runAll(
 
       let failure: OutputStatus | null = null;
       try {
-        await getKernel(block.language).execute(
+        await kernels.get(block.language)!.execute(
           block.source,
           (chunk) => chunks.push(chunk),
           timeout,

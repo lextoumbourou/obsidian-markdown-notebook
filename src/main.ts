@@ -10,6 +10,12 @@ import { processCodeBlock, RunButtonContext, isCellInFlight } from "./RunButton"
 import { activateRunAll, disposeRunAll, runAll } from "./RunAll";
 import { clearStaleRunningBlocks } from "./OutputBlock";
 import { SUPPORTED_LANGUAGES, LANG_ALIASES } from "./languages";
+import { readNotebookFrontmatter } from "./NotebookFrontmatter";
+import {
+  notebookKernelSessionKey,
+  resolveNotebookKernelConfig,
+  NotebookKernelConfig,
+} from "./NotebookKernelConfig";
 import {
   activateRunAllToolbar,
   disposeRunAllToolbar,
@@ -20,9 +26,14 @@ import {
 
 type AnyKernel = BaseKernel | ShellKernel;
 
+interface KernelSession {
+  config: NotebookKernelConfig;
+  kernel: AnyKernel;
+}
+
 export default class MarkdownNotebookPlugin extends Plugin {
   settings: PluginSettings;
-  private kernels: Map<string, AnyKernel> = new Map();
+  private kernels: Map<string, KernelSession> = new Map();
   private runButtonContext?: RunButtonContext;
 
   async onload() {
@@ -34,7 +45,9 @@ export default class MarkdownNotebookPlugin extends Plugin {
     const context: RunButtonContext = {
       app: this.app,
       getSettings: () => this.settings,
-      getKernel: (lang: string) => this.getKernel(lang),
+      acquireKernel: (lang: string, sourcePath: string) => this.acquireKernel(lang, sourcePath),
+      peekExecutionCount: (lang: string, sourcePath: string) =>
+        this.peekExecutionCount(lang, sourcePath),
     };
     this.runButtonContext = context;
     void setRunAllToolbarVisible(this.settings.showRunAllToolbar, context);
@@ -79,7 +92,27 @@ export default class MarkdownNotebookPlugin extends Plugin {
             console.error("[MarkdownNotebook] Stale block cleanup failed:", err)
           );
         }
+        this.reapClosedNotebookSessions();
       })
+    );
+
+    this.registerEvent(
+      this.app.vault.on("rename", (_file, oldPath) => {
+        this.stopSessionsForNote(oldPath);
+      })
+    );
+
+    this.registerEvent(
+      this.app.vault.on("delete", (file) => {
+        if (file instanceof TFile) this.stopSessionsForNote(file.path);
+      })
+    );
+
+    // Persistent sessions live only while at least one Markdown leaf has the
+    // note open. This bounds subprocess growth without discarding state merely
+    // because focus moved to another still-open tab or split.
+    this.registerEvent(
+      this.app.workspace.on("layout-change", () => this.reapClosedNotebookSessions())
     );
 
     this.addCommand({
@@ -92,9 +125,15 @@ export default class MarkdownNotebookPlugin extends Plugin {
       id: "interrupt-kernel",
       name: "Interrupt kernel",
       callback: () => {
-        // Best-effort: interrupt the most recently active language kernel
-        for (const k of this.kernels.values()) k.interrupt();
-        new Notice("Kernel interrupted");
+        const file = this.app.workspace.getActiveViewOfType(MarkdownView)?.file;
+        if (!(file instanceof TFile)) {
+          new Notice("No active Markdown file.");
+          return;
+        }
+        for (const session of this.kernels.values()) {
+          if (session.config.notePath === file.path) session.kernel.interrupt();
+        }
+        new Notice("Notebook kernels interrupted");
       },
     });
 
@@ -111,7 +150,7 @@ export default class MarkdownNotebookPlugin extends Plugin {
         void runAll(
           this.app,
           file,
-          (lang) => this.getKernel(lang),
+          (lang) => this.acquireKernel(lang, file.path),
           this.settings,
           runAllToolbarHooks(file.path),
         );
@@ -122,24 +161,82 @@ export default class MarkdownNotebookPlugin extends Plugin {
   onunload() {
     disposeRunAll();
     disposeRunAllToolbar();
-    for (const k of this.kernels.values()) k.stop();
+    for (const session of this.kernels.values()) session.kernel.stop();
+    this.kernels.clear();
   }
 
-  getKernel(lang: string): AnyKernel {
+  peekExecutionCount(lang: string, sourcePath: string): number {
     const canonical = LANG_ALIASES[lang] ?? lang;
-    if (!this.kernels.has(canonical)) {
-      this.kernels.set(canonical, this.createKernel(canonical));
+    for (const session of this.kernels.values()) {
+      if (
+        session.config.notePath === sourcePath
+        && session.config.language === canonical
+      ) return session.kernel.executionCount;
     }
-    return this.kernels.get(canonical)!;
+    return 0;
   }
 
-  private createKernel(lang: string): AnyKernel {
-    switch (lang) {
-      case "python":     return new SubprocessKernel(this.settings.pythonPath);
-      case "javascript": return new NodeKernel(this.settings.nodePath);
-      case "bash":       return new ShellKernel(this.settings.shellPath);
-      case "r":          return new RKernel(this.settings.rPath);
-      default:           return new ShellKernel(this.settings.shellPath);
+  acquireKernel(lang: string, sourcePath: string): AnyKernel {
+    const canonical = LANG_ALIASES[lang] ?? lang;
+    const file = this.app.vault.getAbstractFileByPath(sourcePath);
+    if (!(file instanceof TFile)) {
+      throw new Error(`Cannot create a kernel: ${sourcePath} is not a Markdown file`);
+    }
+    const config = resolveNotebookKernelConfig(
+      this.app,
+      file,
+      canonical,
+      this.settings,
+      readNotebookFrontmatter(this.app, file),
+    );
+    const key = notebookKernelSessionKey(config);
+    let session = this.kernels.get(key);
+    if (!session) {
+      // A frontmatter or settings change replaces the old session instead of
+      // leaving an unreachable subprocess alive until plugin unload.
+      for (const [existingKey, existing] of this.kernels) {
+        if (
+          existing.config.notePath === config.notePath
+          && existing.config.language === config.language
+        ) {
+          existing.kernel.stop();
+          this.kernels.delete(existingKey);
+        }
+      }
+      session = { config, kernel: this.createKernel(config) };
+      this.kernels.set(key, session);
+    }
+    return session.kernel;
+  }
+
+  private stopSessionsForNote(notePath: string): void {
+    for (const [sessionKey, session] of this.kernels) {
+      if (session.config.notePath !== notePath) continue;
+      session.kernel.stop();
+      this.kernels.delete(sessionKey);
+    }
+  }
+
+  private reapClosedNotebookSessions(): void {
+    const openPaths = new Set<string>();
+    for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
+      const view = leaf.view as unknown as { file?: TFile | null };
+      if (view.file instanceof TFile) openPaths.add(view.file.path);
+    }
+    for (const session of this.kernels.values()) {
+      if (!openPaths.has(session.config.notePath)) {
+        this.stopSessionsForNote(session.config.notePath);
+      }
+    }
+  }
+
+  private createKernel(config: NotebookKernelConfig): AnyKernel {
+    switch (config.language) {
+      case "python":     return new SubprocessKernel(config.executable, config.cwd);
+      case "javascript": return new NodeKernel(config.executable, config.cwd);
+      case "bash":       return new ShellKernel(config.executable, config.cwd);
+      case "r":          return new RKernel(config.executable, config.cwd);
+      default:            return new ShellKernel(config.executable, config.cwd);
     }
   }
 
@@ -150,10 +247,11 @@ export default class MarkdownNotebookPlugin extends Plugin {
       shellPath: "bash",    rPath: "r",
     };
 
-    const langs = key ? [langForKey[key]] : [...this.kernels.keys()];
-    for (const lang of langs) {
-      this.kernels.get(lang)?.stop();
-      this.kernels.delete(lang);
+    const targetLanguage = key ? langForKey[key] : undefined;
+    for (const [sessionKey, session] of this.kernels) {
+      if (targetLanguage && session.config.language !== targetLanguage) continue;
+      session.kernel.stop();
+      this.kernels.delete(sessionKey);
     }
 
     const label = key ? langForKey[key] : "all";

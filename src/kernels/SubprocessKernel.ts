@@ -78,11 +78,13 @@ print(${JSON.stringify(SETUP_DONE_SIGIL)}, flush=True)
 
 export class SubprocessKernel extends BaseKernel {
   private pythonPath: string;
+  private cwd?: string;
   private setupFile: string | null = null;
 
-  constructor(pythonPath: string) {
+  constructor(pythonPath: string, cwd?: string) {
     super();
     this.pythonPath = pythonPath;
+    this.cwd = cwd;
   }
 
   protected async start(): Promise<void> {
@@ -91,6 +93,7 @@ export class SubprocessKernel extends BaseKernel {
 
     this.process = spawn(this.pythonPath, ["-i", "-u", this.setupFile], {
       env: kernelEnv(),
+      cwd: this.cwd,
     });
     this.process.on("close", () => { this.process = null; this.starting = null; });
     this.process.on("error", (err) => {

@@ -13,8 +13,8 @@
  * Differences from the plugin, by design:
  * - format=image only saves native images (matplotlib/R PNGs); the browser
  *   HTML-to-PNG fallback needs a DOM and degrades to format=html here.
- * - The media folder is resolved relative to the note's directory (the CLI
- *   has no vault root).
+ * - The media folder is resolved relative to the note's directory. A vault
+ *   root is discovered or supplied only for cwd's vault-root special value.
  */
 /* eslint-disable no-console -- stdout/stderr are the interface of a CLI */
 import * as fs from "fs";
@@ -30,6 +30,7 @@ import { NodeKernel } from "./kernels/NodeKernel";
 import { ShellKernel } from "./kernels/ShellKernel";
 import { RKernel } from "./kernels/RKernel";
 import type { BaseKernel } from "./kernels/BaseKernel";
+import { resolveExecutable } from "./NotebookKernelConfig";
 
 // hashCodeFence uses the Web Crypto API; expose it on Node < 19
 if (!globalThis.crypto) {
@@ -47,7 +48,9 @@ export interface CliOptions {
   write: boolean;
   timeout?: number;
   media?: string;
+  vaultRoot?: string;
   paths: { python: string; node: string; shell: string; r: string };
+  pathOverrides: Partial<CliOptions["paths"]>;
 }
 
 const USAGE = `Usage: nb-run <file.md> [options]
@@ -64,6 +67,8 @@ Options:
                      or 30000)
   --media <dir>      Folder for format=image PNGs, relative to the note
                      (default: frontmatter notebook.media or next to the note)
+  --vault-root <dir> Vault root for notebook.cwd: / or notebook.cwd: vault
+                     (default: nearest parent containing .obsidian)
   --python <path>    Python executable (default: python3)
   --node <path>      Node executable (default: node)
   --shell <path>     Shell executable (default: bash)
@@ -80,6 +85,7 @@ export function parseArgs(argv: string[]): CliOptions | { error: string } | { he
     only: false,
     write: false,
     paths: { python: "python3", node: "node", shell: "bash", r: "R" },
+    pathOverrides: {},
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -115,10 +121,18 @@ export function parseArgs(argv: string[]): CliOptions | { error: string } | { he
         opts.media = v;
         break;
       }
+      case "--vault-root": {
+        const v = next();
+        if (v === null) return { error: "--vault-root requires a value" };
+        opts.vaultRoot = v;
+        break;
+      }
       case "--python": case "--node": case "--shell": case "--r": {
         const v = next();
         if (v === null) return { error: `${a} requires a value` };
-        opts.paths[a.slice(2) as keyof CliOptions["paths"]] = v;
+        const key = a.slice(2) as keyof CliOptions["paths"];
+        opts.paths[key] = v;
+        opts.pathOverrides[key] = v;
         break;
       }
       default:
@@ -136,6 +150,11 @@ export interface NotebookFm {
   media?: string;
   timeout?: number;
   markdownLinks?: boolean;
+  cwd?: string;
+  python?: string;
+  node?: string;
+  shell?: string;
+  r?: string;
 }
 
 /** Minimal parser for the `notebook:` frontmatter block (flat keys only). */
@@ -163,6 +182,8 @@ export function parseNotebookFrontmatter(content: string): NotebookFm {
     else if (key === "media") fm.media = val;
     else if (key === "timeout" && !isNaN(Number(val))) fm.timeout = Number(val);
     else if (key === "markdownLinks") fm.markdownLinks = val === "true";
+    else if (key === "cwd") fm.cwd = val;
+    else if (key === "python" || key === "node" || key === "shell" || key === "r") fm[key] = val;
   }
   return fm;
 }
@@ -185,12 +206,51 @@ export function selectCells(
   return opts.only ? [target] : Array.from({ length: target + 1 }, (_, i) => i);
 }
 
-function createKernel(lang: string, paths: CliOptions["paths"]): AnyKernel {
+export function findVaultRoot(
+  startDirectory: string,
+  hasObsidianDirectory: (directory: string) => boolean = (directory) =>
+    fs.existsSync(path.join(directory, ".obsidian")),
+): string | null {
+  let current = path.resolve(startDirectory);
+  while (true) {
+    if (hasObsidianDirectory(current)) return current;
+    const parent = path.dirname(current);
+    if (parent === current) return null;
+    current = parent;
+  }
+}
+
+export function resolveCliWorkingDirectory(
+  noteDirectory: string,
+  override?: string,
+  explicitVaultRoot?: string,
+  discoverVaultRoot: (directory: string) => string | null = findVaultRoot,
+): string {
+  if (!override?.trim()) return noteDirectory;
+  const value = override.trim();
+  if (value === "/" || value.toLowerCase() === "vault") {
+    const vaultRoot = explicitVaultRoot
+      ? path.resolve(explicitVaultRoot)
+      : discoverVaultRoot(noteDirectory);
+    if (!vaultRoot) {
+      throw new Error(
+        `notebook.cwd is "${value}", but no parent .obsidian directory was found; ` +
+        `pass --vault-root <dir>`
+      );
+    }
+    return vaultRoot;
+  }
+  return path.isAbsolute(value)
+    ? path.resolve(value)
+    : path.resolve(noteDirectory, value);
+}
+
+function createKernel(lang: string, paths: CliOptions["paths"], cwd: string): AnyKernel {
   switch (lang) {
-    case "python":     return new SubprocessKernel(paths.python);
-    case "javascript": return new NodeKernel(paths.node);
-    case "r":          return new RKernel(paths.r);
-    default:           return new ShellKernel(paths.shell);
+    case "python":     return new SubprocessKernel(paths.python, cwd);
+    case "javascript": return new NodeKernel(paths.node, cwd);
+    case "r":          return new RKernel(paths.r, cwd);
+    default:           return new ShellKernel(paths.shell, cwd);
   }
 }
 
@@ -294,12 +354,33 @@ async function main(): Promise<void> {
 
   const fm = parseNotebookFrontmatter(content);
   const timeout = opts.timeout ?? fm.timeout ?? 30000;
+  const noteDirectory = path.dirname(filePath);
+  let cwd: string;
+  try {
+    cwd = resolveCliWorkingDirectory(noteDirectory, fm.cwd, opts.vaultRoot);
+  } catch (err) {
+    console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
+    process.exitCode = 2;
+    return;
+  }
+  const cliExecutable = (key: keyof CliOptions["paths"], fallback: string): string => {
+    const explicit = opts.pathOverrides[key];
+    if (explicit !== undefined) return resolveExecutable(explicit, process.cwd());
+    const noteOverride = fm[key];
+    return resolveExecutable(noteOverride ?? fallback, noteOverride !== undefined ? noteDirectory : process.cwd());
+  };
+  const paths = {
+    python: cliExecutable("python", opts.paths.python),
+    node: cliExecutable("node", opts.paths.node),
+    shell: cliExecutable("shell", opts.paths.shell),
+    r: cliExecutable("r", opts.paths.r),
+  };
 
   const kernels = new Map<string, AnyKernel>();
   const getKernel = (lang: string): AnyKernel => {
     let k = kernels.get(lang);
     if (!k) {
-      k = createKernel(lang, opts.paths);
+      k = createKernel(lang, paths, cwd);
       kernels.set(lang, k);
     }
     return k;

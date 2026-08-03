@@ -70,11 +70,13 @@ cat(${JSON.stringify(SETUP_DONE_SIGIL)}, '\\n', sep = '')
 
 export class RKernel extends BaseKernel {
   private rPath: string;
+  private cwd?: string;
   private setupFile: string | null = null;
 
-  constructor(rPath: string) {
+  constructor(rPath: string, cwd?: string) {
     super();
     this.rPath = rPath;
+    this.cwd = cwd;
   }
 
   protected async start(): Promise<void> {
@@ -85,7 +87,7 @@ export class RKernel extends BaseKernel {
     this.process = spawn(
       this.rPath,
       ["--slave", "--no-save", "--no-restore"],
-      { env: kernelEnv() }
+      { env: kernelEnv(), cwd: this.cwd }
     );
     this.process.on("close", () => { this.process = null; this.starting = null; });
     this.process.on("error", (err) => {

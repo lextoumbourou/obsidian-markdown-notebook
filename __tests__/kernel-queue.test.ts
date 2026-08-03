@@ -15,6 +15,21 @@ import type { OutputChunk } from "../src/output/MimeRenderer";
  */
 
 describe("ShellKernel queue recovery", () => {
+  it("runs cells in the configured working directory", async () => {
+    const kernel = new ShellKernel("bash", process.cwd());
+    const chunks: OutputChunk[] = [];
+
+    await kernel.execute("pwd", (chunk) => chunks.push(chunk), 5000);
+
+    const stdout = chunks
+      .filter((chunk): chunk is Extract<OutputChunk, { type: "stream" }> => chunk.type === "stream")
+      .map((chunk) => chunk.text)
+      .join("")
+      .trim();
+    expect(stdout).toBe(process.cwd());
+    kernel.stop();
+  });
+
   it("runs the next cell normally after a timeout", async () => {
     const kernel = new ShellKernel("bash");
 
@@ -92,6 +107,8 @@ class FakeKernel extends BaseKernel {
           setImmediate(() => {
             stdout.emit("data", Buffer.from("STALE LATE OUTPUT\n" + sigil));
           });
+        } else if (signal !== "SIGINT") {
+          setImmediate(() => fake.emit("close"));
         }
         return true;
       },
@@ -106,9 +123,33 @@ class FakeKernel extends BaseKernel {
   protected filterStderr(text: string): string {
     return text;
   }
+
+  crash(): void {
+    this.process?.emit("close", 1, null);
+  }
 }
 
 describe("BaseKernel queue recovery", () => {
+  it("settles immediately when an active kernel is stopped", async () => {
+    const kernel = new FakeKernel();
+    const running = kernel.execute("HANG", () => {}, 10000);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    kernel.stop();
+
+    await expect(running).rejects.toBeInstanceOf(KernelCancelledError);
+  });
+
+  it("rejects promptly when a kernel process exits unexpectedly", async () => {
+    const kernel = new FakeKernel();
+    const running = kernel.execute("HANG", () => {}, 10000);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    kernel.crash();
+
+    await expect(running).rejects.toThrow("Kernel process exited during execution");
+  });
+
   it("rejects a stopped queued cell without waiting for the active cell", async () => {
     const kernel = new FakeKernel();
     const activeController = new AbortController();

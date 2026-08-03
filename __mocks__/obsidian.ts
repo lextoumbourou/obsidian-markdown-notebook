@@ -68,6 +68,7 @@ export const Setting = jest.fn().mockImplementation(() => ({
 }));
 
 export class Vault {
+  on = jest.fn(() => ({ off: jest.fn() }));
   process = jest.fn();
   read = jest.fn();
   modify = jest.fn();

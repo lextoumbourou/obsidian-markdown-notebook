@@ -88,6 +88,7 @@ export abstract class BaseKernel {
   protected starting: Promise<void> | null = null;
   private execQueue: Promise<void> = Promise.resolve();
   private pendingDrain: Promise<void> | null = null;
+  private intentionallyStopped = new WeakSet<ChildProcessWithoutNullStreams>();
   executionCount = 0;
 
   protected abstract start(): Promise<void>;
@@ -144,6 +145,7 @@ export abstract class BaseKernel {
     const wrapped = this.wrapCode(code, finishSigil);
 
     return new Promise<void>((resolve, reject) => {
+      const proc = this.process!;
       let stdoutBuf = "";
       let stderrBuf = "";
       let done = false;
@@ -152,8 +154,10 @@ export abstract class BaseKernel {
         if (done) return;
         done = true;
         clearTimeout(timer);
-        this.process?.stdout.removeListener("data", onStdout);
-        this.process?.stderr.removeListener("data", onStderr);
+        proc.stdout.removeListener("data", onStdout);
+        proc.stderr.removeListener("data", onStderr);
+        proc.removeListener("close", onProcessClose);
+        proc.removeListener("error", onProcessError);
         signal?.removeEventListener("abort", onAbort);
         this.executionCount++;
         resolve();
@@ -163,8 +167,10 @@ export abstract class BaseKernel {
         if (done) return;
         done = true;
         clearTimeout(timer);
-        this.process?.stdout.removeListener("data", onStdout);
-        this.process?.stderr.removeListener("data", onStderr);
+        proc.stdout.removeListener("data", onStdout);
+        proc.stderr.removeListener("data", onStderr);
+        proc.removeListener("close", onProcessClose);
+        proc.removeListener("error", onProcessError);
         signal?.removeEventListener("abort", onAbort);
         this.interrupt();
         this.pendingDrain = this.drainStale(finishSigil).finally(() => {
@@ -174,6 +180,25 @@ export abstract class BaseKernel {
       };
 
       const onAbort = () => rejectInterrupted(new KernelCancelledError());
+
+      const rejectTerminated = (error: Error) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        proc.stdout.removeListener("data", onStdout);
+        proc.stderr.removeListener("data", onStderr);
+        proc.removeListener("close", onProcessClose);
+        proc.removeListener("error", onProcessError);
+        signal?.removeEventListener("abort", onAbort);
+        reject(error);
+      };
+
+      const onProcessClose = () => rejectTerminated(
+        this.intentionallyStopped.has(proc)
+          ? new KernelCancelledError()
+          : new Error("Kernel process exited during execution")
+      );
+      const onProcessError = (error: Error) => rejectTerminated(error);
 
       const timer = setTimeout(() => {
         // Interrupt the runaway cell and discard its late output so it
@@ -237,14 +262,16 @@ export abstract class BaseKernel {
         }
       };
 
-      this.process!.stdout.on("data", onStdout);
-      this.process!.stderr.on("data", onStderr);
+      proc.stdout.on("data", onStdout);
+      proc.stderr.on("data", onStderr);
+      proc.once("close", onProcessClose);
+      proc.once("error", onProcessError);
       signal?.addEventListener("abort", onAbort, { once: true });
       if (signal?.aborted) {
         onAbort();
         return;
       }
-      this.process!.stdin.write(wrapped);
+      proc.stdin.write(wrapped);
     });
   }
 
@@ -296,6 +323,7 @@ export abstract class BaseKernel {
 
   stop(): void {
     if (this.process) {
+      this.intentionallyStopped.add(this.process);
       this.process.kill();
       this.process = null;
       this.starting = null;
@@ -316,6 +344,7 @@ export abstract class BaseKernel {
         clearTimeout(timer);
         proc.stdout.removeListener("data", onData);
         proc.removeListener("error", onError);
+        proc.removeListener("close", onClose);
       };
       const onData = (data: Buffer) => {
         buf += data.toString();
@@ -328,12 +357,21 @@ export abstract class BaseKernel {
         cleanup();
         reject(err);
       };
+      const onClose = () => {
+        cleanup();
+        reject(
+          this.intentionallyStopped.has(proc)
+            ? new KernelCancelledError()
+            : new Error("Kernel process exited during startup")
+        );
+      };
       const timer = setTimeout(() => {
         cleanup();
         reject(new Error("Kernel startup timed out"));
       }, timeoutMs);
       proc.stdout.on("data", onData);
       proc.once("error", onError);
+      proc.once("close", onClose);
     });
   }
 }

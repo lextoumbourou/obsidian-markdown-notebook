@@ -15,7 +15,7 @@ type AnyKernel = BaseKernel | ShellKernel;
 
 export interface RunAllToolbarContext {
   app: App;
-  getKernel: (language: string) => AnyKernel;
+  acquireKernel: (language: string, sourcePath: string) => AnyKernel;
   getSettings: () => PluginSettings;
 }
 
@@ -244,7 +244,7 @@ async function renderToolbarInHost(
         await runAll(
           context.app,
           currentFile,
-          (language) => context.getKernel(language),
+          (language) => context.acquireKernel(language, currentFile.path),
           context.getSettings(),
           runAllToolbarHooks(currentFile.path),
         );

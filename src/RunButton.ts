@@ -73,7 +73,8 @@ export function isCellInFlight(sourcePath: string, hash: string): boolean {
 export interface RunButtonContext {
   app: App;
   getSettings: () => PluginSettings;
-  getKernel: (lang: string) => AnyKernel;
+  acquireKernel: (lang: string, sourcePath: string) => AnyKernel;
+  peekExecutionCount: (lang: string, sourcePath: string) => number;
 }
 
 /** Args parsed from `{key=value}` pairs in the fence info string. */
@@ -117,16 +118,15 @@ export async function processCodeBlock(
   scheduleRunAllToolbarRender(ctx, context);
   const { app } = context;
 
-  const settings = context.getSettings();
-  const kernel = context.getKernel(language);
   const pre = renderPlainCodeBlock(src, el, language);
+  const settings = context.getSettings();
   const hash = await hashCodeFence(language, src);
   const flightKey = `${ctx.sourcePath}::${hash}`;
 
   const buttonWrap = pre.createDiv({ cls: "nb-run-button-wrap" });
   const countBadge = buttonWrap.createEl("span", {
     cls: "nb-exec-count",
-    text: `[${kernel.executionCount}]`,
+    text: `[${context.peekExecutionCount(language, ctx.sourcePath)}]`,
   });
   const button = buttonWrap.createEl("button", {
     cls: "nb-run-button",
@@ -158,6 +158,7 @@ export async function processCodeBlock(
     updateCellRunButtons(run);
 
     inFlight.add(flightKey);
+    let executedKernel: AnyKernel | null = null;
     try {
       // Re-read section info at click time so args are never stale.
       // getSectionInfo can return null during the initial render pass.
@@ -182,7 +183,6 @@ export async function processCodeBlock(
         ? readNotebookFrontmatter(app, file)
         : {};
       const timeout = fm.timeout ?? settings.executionTimeout;
-
       const pendingFormat = (runArgs.format ?? fm.format ?? settings.defaultFormat) as OutputFormat;
 
       // Identify the cell by content, not position — line numbers go stale as
@@ -201,7 +201,10 @@ export async function processCodeBlock(
 
       let failure: "error" | "timeout" | "cancelled" | null = null;
       try {
-        await kernel.execute(src, (chunk) => {
+        // Acquire only for actual execution. Rendering and badge updates use a
+        // non-creating lookup and can never replace a live session.
+        executedKernel = context.acquireKernel(language, ctx.sourcePath);
+        await executedKernel.execute(src, (chunk) => {
           chunks.push(chunk);
           appendChunkToElement(liveEl, chunk);
         }, timeout, controller.signal);
@@ -278,7 +281,10 @@ export async function processCodeBlock(
       inFlight.delete(flightKey);
       if (activeCellRuns.get(flightKey) === run) activeCellRuns.delete(flightKey);
       resetCellRunButtons(run);
-      countBadge.textContent = `[${context.getKernel(language).executionCount}]`;
+      countBadge.textContent = `[${
+        executedKernel?.executionCount
+        ?? context.peekExecutionCount(language, ctx.sourcePath)
+      }]`;
     }
   });
 }

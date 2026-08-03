@@ -1,4 +1,11 @@
-import { parseArgs, parseNotebookFrontmatter, selectCells, CliOptions } from '../src/cli';
+import {
+  parseArgs,
+  parseNotebookFrontmatter,
+  selectCells,
+  findVaultRoot,
+  resolveCliWorkingDirectory,
+  CliOptions,
+} from '../src/cli';
 
 describe('parseArgs', () => {
   const ok = (argv: string[]): CliOptions => {
@@ -29,6 +36,10 @@ describe('parseArgs', () => {
     expect(opts.paths.r).toBe('/usr/local/bin/R');
   });
 
+  it('parses an explicit vault root', () => {
+    expect(ok(['Note.md', '--vault-root', '../vault']).vaultRoot).toBe('../vault');
+  });
+
   it('returns help for -h', () => {
     expect(parseArgs(['-h'])).toEqual({ help: true });
   });
@@ -50,6 +61,34 @@ describe('parseArgs', () => {
   });
 });
 
+describe('CLI working directory resolution', () => {
+  it('discovers the nearest vault root for both special values', () => {
+    const discover = jest.fn(() => '/vault');
+    expect(resolveCliWorkingDirectory('/vault/notes/project', '/', undefined, discover)).toBe('/vault');
+    expect(resolveCliWorkingDirectory('/vault/notes/project', 'vault', undefined, discover)).toBe('/vault');
+  });
+
+  it('uses an explicit vault root when discovery is unavailable', () => {
+    expect(resolveCliWorkingDirectory('/export/notes', '/', '/real/vault', () => null))
+      .toBe('/real/vault');
+  });
+
+  it('refuses special values when it cannot identify a vault', () => {
+    expect(() => resolveCliWorkingDirectory('/export/notes', 'vault', undefined, () => null))
+      .toThrow(/--vault-root/);
+  });
+
+  it('keeps ordinary absolute and note-relative paths unambiguous', () => {
+    expect(resolveCliWorkingDirectory('/vault/notes', '/tmp/work')).toBe('/tmp/work');
+    expect(resolveCliWorkingDirectory('/vault/notes', 'data')).toBe('/vault/notes/data');
+  });
+
+  it('walks upward until it finds the nearest .obsidian directory', () => {
+    expect(findVaultRoot('/vault/notes/project', (dir) => dir === '/vault')).toBe('/vault');
+    expect(findVaultRoot('/outside', () => false)).toBeNull();
+  });
+});
+
 describe('parseNotebookFrontmatter', () => {
   it('returns empty for files without frontmatter', () => {
     expect(parseNotebookFrontmatter('# Title\n```python\n```')).toEqual({});
@@ -64,6 +103,8 @@ describe('parseNotebookFrontmatter', () => {
       '  media: attachments',
       '  timeout: 60000',
       '  markdownLinks: true',
+      '  cwd: data',
+      '  python: .venv/bin/python',
       '---',
       '# Body',
     ].join('\n');
@@ -72,6 +113,8 @@ describe('parseNotebookFrontmatter', () => {
       media: 'attachments',
       timeout: 60000,
       markdownLinks: true,
+      cwd: 'data',
+      python: '.venv/bin/python',
     });
   });
 
