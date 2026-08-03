@@ -7,6 +7,7 @@ import {
   runAll,
 } from '../src/RunAll';
 import { DEFAULT_SETTINGS } from '../src/settings/Settings';
+import { KernelTimeoutError } from '../src/kernels/BaseKernel';
 import * as HtmlToImage from '../src/output/HtmlToImage';
 
 type RunAllResult = {
@@ -220,6 +221,7 @@ describe('runAll', () => {
     expect(progress).toEqual([1, 2, 3]);
     expect(memory.content().match(/<!-- nb-output/g)).toHaveLength(3);
     expect(memory.content()).toContain('status="error"');
+    expect(memory.content()).toContain('expected failure');
   });
 
   it('stops after the first failed cell by default', async () => {
@@ -249,6 +251,22 @@ describe('runAll', () => {
     expect(progress).toEqual([1, 2]);
     expect(memory.content().match(/<!-- nb-output/g)).toHaveLength(2);
     expect(memory.content()).toContain('status="error"');
+    expect(memory.content()).toContain('expected failure');
+  });
+
+  it('writes the timeout message only once', async () => {
+    const memory = memoryNotebook(notebook('while True: pass'));
+    const kernel = {
+      executionCount: 0,
+      async execute() {
+        throw new KernelTimeoutError(30000);
+      },
+    };
+
+    await runAllWithHooks(memory.app, memory.file, () => kernel, DEFAULT_SETTINGS);
+
+    expect(memory.content()).toContain('status="timeout"');
+    expect(memory.content().match(/Execution timed out/g)).toHaveLength(1);
   });
 
   it('skips an overlapping run for the same file', async () => {

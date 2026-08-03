@@ -22,9 +22,9 @@ import * as path from "path";
 import { webcrypto } from "crypto";
 import { parseRunBlocks, RunBlock } from "./CellParser";
 import { applyOutputBlock, OutputFormat, OutputStatus, ERROR_HTML, timeoutHtml } from "./OutputBlockCore";
-import { KernelTimeoutError } from "./kernels/BaseKernel";
+import { KernelExecutionError, KernelTimeoutError } from "./kernels/BaseKernel";
 import { hashCodeFence } from "./HashUtils";
-import { renderChunksToHtml, extractImageData, OutputChunk } from "./output/MimeRenderer";
+import { renderChunksToHtml, renderFailureToHtml, extractImageData, OutputChunk } from "./output/MimeRenderer";
 import { SubprocessKernel } from "./kernels/SubprocessKernel";
 import { NodeKernel } from "./kernels/NodeKernel";
 import { ShellKernel } from "./kernels/ShellKernel";
@@ -408,7 +408,11 @@ async function main(): Promise<void> {
       failed = true;
       failure = err instanceof KernelTimeoutError ? "timeout" : "error";
       const msg = err instanceof Error ? err.message : String(err);
-      process.stderr.write(`${msg}\n`);
+      if (!(err instanceof KernelExecutionError) && !(err instanceof KernelTimeoutError)) {
+        const chunk = { type: "error" as const, text: msg };
+        chunks.push(chunk);
+        printChunk(chunk, opts.write);
+      }
     }
     results.push({ block, chunks, failure });
   }
@@ -421,7 +425,10 @@ async function main(): Promise<void> {
       // Failed cells get the same status blocks the plugin writes
       const { content: outContent, format, status } = failure
         ? {
-            content: failure === "timeout" ? timeoutHtml(timeout) : ERROR_HTML,
+            content: renderFailureToHtml(
+              failure === "timeout" ? timeoutHtml(timeout) : ERROR_HTML,
+              chunks,
+            ),
             format: "html" as OutputFormat,
             status: failure,
           }

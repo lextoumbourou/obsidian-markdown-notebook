@@ -1,5 +1,6 @@
 import {
   renderChunksToHtml,
+  renderFailureToHtml,
   extractImageData,
   OutputChunk,
 } from '../src/output/MimeRenderer';
@@ -62,6 +63,18 @@ describe('renderChunksToHtml', () => {
     const html = renderChunksToHtml(chunks);
     expect(html).toContain('nb-stream-stdout');
     expect(html).toContain('nb-stream-stderr');
+  });
+});
+
+describe('renderFailureToHtml', () => {
+  it('keeps the failure status and escapes persisted diagnostics', () => {
+    const html = renderFailureToHtml(
+      '<div class="nb-status-error">Execution failed</div>',
+      [{ type: 'error', text: 'Traceback: value < 3' }],
+    );
+    expect(html).toContain('nb-status-error');
+    expect(html).toContain('Traceback: value &lt; 3');
+    expect(html).not.toContain('value < 3');
   });
 });
 

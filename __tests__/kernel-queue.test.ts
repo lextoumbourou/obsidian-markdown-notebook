@@ -2,7 +2,9 @@ import { EventEmitter } from "events";
 import type { ChildProcessWithoutNullStreams } from "child_process";
 import {
   BaseKernel,
+  ERROR_SIGIL,
   KernelCancelledError,
+  KernelExecutionError,
   KernelTimeoutError,
 } from "../src/kernels/BaseKernel";
 import { ShellKernel } from "../src/kernels/ShellKernel";
@@ -15,6 +17,26 @@ import type { OutputChunk } from "../src/output/MimeRenderer";
  */
 
 describe("ShellKernel queue recovery", () => {
+  it("rejects non-zero exits and preserves stderr diagnostics", async () => {
+    const kernel = new ShellKernel("bash");
+    const chunks: OutputChunk[] = [];
+
+    await expect(kernel.execute(
+      "echo before; echo bad-news >&2; exit 7",
+      (chunk) => chunks.push(chunk),
+      5000,
+    )).rejects.toBeInstanceOf(KernelExecutionError);
+
+    const text = chunks.map((chunk) => "text" in chunk ? chunk.text : "").join("");
+    expect(text).toContain("before");
+    expect(text).toContain("bad-news");
+    expect(text).toContain("code 7");
+    expect(kernel.executionCount).toBe(1);
+
+    await expect(kernel.execute("echo recovered", () => {}, 5000)).resolves.toBeUndefined();
+    kernel.stop();
+  });
+
   it("runs cells in the configured working directory", async () => {
     const kernel = new ShellKernel("bash", process.cwd());
     const chunks: OutputChunk[] = [];
@@ -95,7 +117,15 @@ class FakeKernel extends BaseKernel {
             return true;
           }
           setImmediate(() => {
-            stdout.emit("data", Buffer.from("ran\n" + sigil));
+            if (wrapped.includes("FAIL_PROTOCOL")) {
+              const payload = JSON.stringify({
+                message: "ValueError: bad value",
+                detail: "Traceback\nValueError: bad value\n",
+              });
+              stdout.emit("data", Buffer.from(ERROR_SIGIL + payload + "\n" + sigil));
+            } else {
+              stdout.emit("data", Buffer.from("ran\n" + sigil));
+            }
           });
           return true;
         },
@@ -130,6 +160,26 @@ class FakeKernel extends BaseKernel {
 }
 
 describe("BaseKernel queue recovery", () => {
+  it("turns a structured language error into a rejected execution with output", async () => {
+    const kernel = new FakeKernel();
+    const chunks: OutputChunk[] = [];
+
+    await expect(kernel.execute(
+      "FAIL_PROTOCOL",
+      (chunk) => chunks.push(chunk),
+      5000,
+    )).rejects.toMatchObject({
+      name: "KernelExecutionError",
+      message: "ValueError: bad value",
+    });
+
+    expect(chunks).toContainEqual({
+      type: "error",
+      text: "Traceback\nValueError: bad value\n",
+    });
+    await expect(kernel.execute("ok", () => {}, 5000)).resolves.toBeUndefined();
+  });
+
   it("settles immediately when an active kernel is stopped", async () => {
     const kernel = new FakeKernel();
     const running = kernel.execute("HANG", () => {}, 10000);

@@ -7,6 +7,7 @@
 - Notebook-scoped kernel sessions: persistent Python, Node.js, and R state is shared within a note but isolated between notes, along with execution counts and runtime configuration
 - Kernels now use the note's folder as their working directory, making relative file access predictable; `notebook.cwd` can select a note-relative directory, an absolute path, or the vault root with `/`/`vault`
 - Per-note `notebook.python`, `notebook.node`, `notebook.shell`, and `notebook.r` executable overrides, with relative executable paths resolved from the note's folder
+- Persistent failure diagnostics: Python, Node.js, and R exceptions and non-zero shell exits now store the failure marker together with preceding output and an escaped traceback/stderr
 
 ### Changed
 - **Interrupt kernel** now targets kernels belonging to the active note; **Restart all kernels** and plugin unload clean up every notebook-scoped session
@@ -19,6 +20,10 @@
 - Rendering a code block or execution-count badge no longer creates, replaces, or throws from kernel acquisition, so Canvas, exports, and third-party Markdown rendering can display cells without a resolvable source file
 - Replacing or shutting down an active Python, Node.js, R, or shell kernel now settles the cell immediately as cancelled instead of leaving it stuck until its execution timeout
 - Run All snapshots one kernel per language before execution, so frontmatter edits cannot replace a session and discard state midway through the run
+- Python, Node.js, and R exceptions now reject the cell execution instead of being treated as successful stderr output; persistent kernels remain usable by subsequent cells
+- Non-zero shell exit codes now fail the cell, making **Stop on first error** reliable for shell notebooks
+- Single-cell, Run All, timeout, and `nb-run --write` failure blocks now retain collected diagnostics instead of replacing them with only a generic “Execution failed” marker
+- Timeout output blocks no longer repeat the timeout message as both a status and a diagnostic chunk
 
 ## [0.3.0] - 2026-07-28
 

@@ -2,7 +2,7 @@ import { spawn } from "child_process";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { BaseKernel, RICH_SIGIL, SETUP_DONE_SIGIL, stripAnsi, kernelEnv } from "./BaseKernel";
+import { BaseKernel, ERROR_SIGIL, RICH_SIGIL, SETUP_DONE_SIGIL, stripAnsi, kernelEnv } from "./BaseKernel";
 
 const SETUP_SCRIPT = `
 import sys as __nb_sys__
@@ -11,6 +11,7 @@ import base64 as __nb_base64__
 
 __nb_globals__ = {**globals()}
 __NB_RICH__ = ${JSON.stringify(RICH_SIGIL)}
+__NB_ERROR__ = ${JSON.stringify(ERROR_SIGIL)}
 
 def __nb_show_rich__(mime, data):
     print(__NB_RICH__ + __nb_json__.dumps({'mime': mime, 'data': data}), flush=True)
@@ -112,7 +113,9 @@ try:
     __nb_run__(${escaped})
 except BaseException as __nb_e__:
     import traceback as __nb_tb__
-    print(__nb_tb__.format_exc(), file=__nb_sys__.stderr, flush=True)
+    __nb_detail__ = __nb_tb__.format_exc()
+    __nb_message__ = f'{type(__nb_e__).__name__}: {__nb_e__}'
+    print(__NB_ERROR__ + __nb_json__.dumps({'message': __nb_message__, 'detail': __nb_detail__}), flush=True)
 finally:
     print(${JSON.stringify(finishSigil)}, end='', flush=True)
 

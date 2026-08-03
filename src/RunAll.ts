@@ -11,11 +11,12 @@ import {
   ERROR_HTML,
   timeoutHtml,
 } from "./OutputBlock";
-import { KernelCancelledError, KernelTimeoutError } from "./kernels/BaseKernel";
+import { KernelCancelledError, KernelExecutionError, KernelTimeoutError } from "./kernels/BaseKernel";
 
 export { parseRunBlocks } from "./CellParser";
 import {
   renderChunksToHtml,
+  renderFailureToHtml,
   extractImageData,
   OutputChunk,
 } from "./output/MimeRenderer";
@@ -274,6 +275,9 @@ export async function runAll(
         failure = err instanceof KernelTimeoutError ? "timeout" : "error";
         failedCells.add(i);
         const msg = err instanceof Error ? err.message : String(err);
+        if (!(err instanceof KernelExecutionError) && !(err instanceof KernelTimeoutError)) {
+          chunks.push({ type: "error", text: msg });
+        }
         new Notice(`Notebook: cell ${current}: ${msg}`);
       }
 
@@ -283,7 +287,7 @@ export async function runAll(
           ...block,
           cellIndex: i,
           hash,
-          content: statusHtml,
+          content: renderFailureToHtml(statusHtml, chunks),
           format: "html",
           status: failure,
         });

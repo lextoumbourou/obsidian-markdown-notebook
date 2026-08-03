@@ -17,11 +17,12 @@ import {
 import {
   appendChunkToElement,
   renderChunksToHtml,
+  renderFailureToHtml,
   extractImageData,
   OutputChunk,
 } from "./output/MimeRenderer";
 import { renderHtmlToPng } from "./output/HtmlToImage";
-import { KernelCancelledError, KernelTimeoutError } from "./kernels/BaseKernel";
+import { KernelCancelledError, KernelExecutionError, KernelTimeoutError } from "./kernels/BaseKernel";
 import type { BaseKernel } from "./kernels/BaseKernel";
 import type { ShellKernel } from "./kernels/ShellKernel";
 import type { PluginSettings } from "./settings/Settings";
@@ -218,8 +219,11 @@ export async function processCodeBlock(
           new Notice("Notebook: execution stopped.");
         } else {
           const msg = err instanceof Error ? err.message : String(err);
-          chunks.push({ type: "error", text: msg });
-          appendChunkToElement(liveEl, { type: "error", text: msg });
+          if (!(err instanceof KernelExecutionError) && !(err instanceof KernelTimeoutError)) {
+            const chunk = { type: "error" as const, text: msg };
+            chunks.push(chunk);
+            appendChunkToElement(liveEl, chunk);
+          }
           new Notice(`Notebook: ${msg}`);
         }
       }
@@ -229,9 +233,10 @@ export async function processCodeBlock(
           const statusHtml = failure === "cancelled"
             ? INTERRUPTED_HTML
             : failure === "timeout" ? timeoutHtml(timeout) : ERROR_HTML;
+          const failureHtml = renderFailureToHtml(statusHtml, chunks);
           try {
             await writeOutputBlock(
-              app, file, cell, hash, statusHtml, pendingFormat, runArgs.id,
+              app, file, cell, hash, failureHtml, "html", runArgs.id,
               failure === "cancelled" ? "error" : failure,
             );
           } catch (err) {

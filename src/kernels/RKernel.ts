@@ -2,7 +2,7 @@ import { spawn } from "child_process";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { BaseKernel, RICH_SIGIL, SETUP_DONE_SIGIL, stripAnsi, kernelEnv } from "./BaseKernel";
+import { BaseKernel, ERROR_SIGIL, RICH_SIGIL, SETUP_DONE_SIGIL, stripAnsi, kernelEnv } from "./BaseKernel";
 
 /**
  * R kernel using a persistent `R --slave --no-save --no-restore` process.
@@ -16,6 +16,7 @@ import { BaseKernel, RICH_SIGIL, SETUP_DONE_SIGIL, stripAnsi, kernelEnv } from "
  */
 const SETUP_SCRIPT = `
 .nb_rich <- ${JSON.stringify(RICH_SIGIL)}
+.nb_error <- ${JSON.stringify(ERROR_SIGIL)}
 
 # Proper JSON via jsonlite so quotes/newlines in data are escaped — the
 # payload stays on one line and the TS side JSON.parses it back.
@@ -117,7 +118,10 @@ tryCatch(
       invokeRestart("muffleMessage")
     }
   ),
-  error = function(e) cat(paste0("Error: ", conditionMessage(e), "\\n"), file = stderr())
+  error = function(e) {
+    detail <- paste0("Error: ", conditionMessage(e))
+    cat(.nb_error, "url:", utils::URLencode(detail, reserved = TRUE), '\\n', sep = '')
+  }
 )
 .nb_flush_plot()
 cat(${JSON.stringify(finishSigil)}, sep='')

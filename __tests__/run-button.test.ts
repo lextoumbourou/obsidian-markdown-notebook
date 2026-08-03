@@ -1,7 +1,7 @@
 import { TFile } from 'obsidian';
 import type { MarkdownPostProcessorContext } from 'obsidian';
 import { processCodeBlock } from '../src/RunButton';
-import { KernelCancelledError } from '../src/kernels/BaseKernel';
+import { KernelCancelledError, KernelExecutionError } from '../src/kernels/BaseKernel';
 import { DEFAULT_SETTINGS } from '../src/settings/Settings';
 import { clearRunAllToolbarTimers } from '../src/RunAllToolbar';
 
@@ -108,6 +108,52 @@ describe('Run button', () => {
     await expect(root.querySelector('.nb-run-button')!.click()).resolves.toBeUndefined();
     expect(acquireKernel).toHaveBeenCalledTimes(1);
     expect(root.querySelector('.nb-run-button')?.textContent).toBe('▶ Run');
+  });
+
+  it('persists escaped traceback output with the failed status', async () => {
+    const source = 'raise ValueError("bad")';
+    let markdown = `\`\`\`python\n${source}\n\`\`\``;
+    const file = new TFile();
+    file.path = 'note.md';
+    Object.assign(file, { extension: 'md', parent: { path: '' } });
+    const app = {
+      metadataCache: { getFileCache: jest.fn(() => null) },
+      workspace: { getLeavesOfType: jest.fn(() => []) },
+      vault: {
+        getAbstractFileByPath: jest.fn(() => file),
+        process: jest.fn(async (_file: TFile, transform: (raw: string) => string) => {
+          markdown = transform(markdown);
+        }),
+      },
+    };
+    const kernel = {
+      executionCount: 1,
+      async execute(_code: string, onChunk: (chunk: { type: 'error'; text: string }) => void) {
+        const detail = 'Traceback\nValueError: value < 3\n';
+        onChunk({ type: 'error', text: detail });
+        throw new KernelExecutionError('ValueError: value < 3', detail);
+      },
+    };
+    const context = {
+      app,
+      getSettings: () => DEFAULT_SETTINGS,
+      acquireKernel: () => kernel,
+      peekExecutionCount: () => kernel.executionCount,
+    };
+    const ctx = {
+      sourcePath: file.path,
+      getSectionInfo: () => ({ text: markdown, lineStart: 0, lineEnd: 2 }),
+    } as unknown as MarkdownPostProcessorContext;
+    Object.assign(globalThis, { window: {}, HTMLPreElement: FakeElement });
+    const root = new FakeElement();
+
+    await processCodeBlock(source, root as unknown as HTMLElement, ctx, context as never, 'python');
+    await root.querySelector('.nb-run-button')!.click();
+
+    expect(markdown).toContain('status="error"');
+    expect(markdown).toContain('Execution failed');
+    expect(markdown).toContain('ValueError: value &lt; 3');
+    expect(markdown).not.toContain('ValueError: value < 3\n</pre>');
   });
 
   it('keeps Stop available after a re-render and writes an interrupted state', async () => {

@@ -53,14 +53,17 @@ echo "err" >&2
 </div>
 <!-- /nb-output -->
 
-## 5. Failing command — expect a red `No such file or directory` error (cell still completes)
+## 5. Failing command — expect a failed status with the red stderr and exit code persisted
 
 ```bash
 ls /definitely/not/a/real/path
 ```
-<!-- nb-output hash="cd893297b7271237" format="html" -->
+<!-- nb-output hash="cd893297b7271237" format="html" status="error" -->
+<div class="nb-status-error">Execution failed</div>
 <div class="nb-output">
 <pre class="nb-stream-stderr">ls: /definitely/not/a/real/path: No such file or directory
+</pre>
+<pre class="nb-stream-stderr">Shell process exited with code 1
 </pre>
 </div>
 <!-- /nb-output -->

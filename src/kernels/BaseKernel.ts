@@ -4,7 +4,18 @@ import type { OutputChunk } from "../output/MimeRenderer";
 // \x01, not \x00: R string literals cannot contain nul bytes, and the sigil
 // must be expressible in every kernel's setup script.
 export const RICH_SIGIL = "\x01NB_RICH\x01";
+export const ERROR_SIGIL = "\x01NB_ERROR\x01";
 export const SETUP_DONE_SIGIL = "__NB_SETUP_DONE__";
+
+/** Thrown when user code completed with a language-level exception or a
+ * non-zero process exit. The diagnostic itself is also emitted as an output
+ * chunk so callers can persist it exactly once. */
+export class KernelExecutionError extends Error {
+  constructor(message: string, public readonly detail: string) {
+    super(message);
+    this.name = "KernelExecutionError";
+  }
+}
 
 /** Thrown when a cell exceeds its execution timeout, so callers can
  * distinguish a timeout from a genuine execution failure. */
@@ -148,6 +159,7 @@ export abstract class BaseKernel {
       const proc = this.process!;
       let stdoutBuf = "";
       let stderrBuf = "";
+      let executionError: KernelExecutionError | null = null;
       let done = false;
 
       const finish = () => {
@@ -160,7 +172,8 @@ export abstract class BaseKernel {
         proc.removeListener("error", onProcessError);
         signal?.removeEventListener("abort", onAbort);
         this.executionCount++;
-        resolve();
+        if (executionError) reject(executionError);
+        else resolve();
       };
 
       const rejectInterrupted = (error: Error) => {
@@ -253,6 +266,35 @@ export abstract class BaseKernel {
             } catch {
               onChunk({ type: "stream", stream: "stdout", text: line + "\n" });
             }
+          } else if (line.startsWith(ERROR_SIGIL)) {
+            if (plainBuf) {
+              onChunk({ type: "stream", stream: "stdout", text: plainBuf });
+              plainBuf = "";
+            }
+            const payload = line.slice(ERROR_SIGIL.length);
+            let message = "Execution failed";
+            let detail = payload;
+            try {
+              if (payload.startsWith("url:")) {
+                detail = decodeURIComponent(payload.slice(4));
+                message = detail.split("\n")[0] || message;
+              } else {
+                const parsed = JSON.parse(payload);
+                if (typeof parsed === "string") {
+                  detail = parsed;
+                  message = parsed.trim().split("\n")[0] || message;
+                } else {
+                  detail = String(parsed.detail ?? parsed.message ?? message);
+                  message = String(parsed.message ?? message);
+                }
+              }
+            } catch {
+              // Preserve malformed protocol payloads as diagnostics rather
+              // than losing the error or treating the cell as successful.
+            }
+            if (!detail.endsWith("\n")) detail += "\n";
+            onChunk({ type: "error", text: detail });
+            executionError = new KernelExecutionError(message, detail);
           } else {
             plainBuf += line + "\n";
           }

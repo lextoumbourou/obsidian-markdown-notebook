@@ -12,6 +12,13 @@ export function renderChunksToHtml(chunks: OutputChunk[]): string {
   return `<div class="nb-output">\n${parts.join("\n")}\n</div>`;
 }
 
+/** Render a failed cell's status together with all output collected before
+ * the failure. Text and traceback chunks are escaped by renderChunksToHtml. */
+export function renderFailureToHtml(statusHtml: string, chunks: OutputChunk[]): string {
+  const output = renderChunksToHtml(chunks);
+  return output ? `${statusHtml}\n${output}` : statusHtml;
+}
+
 function renderChunk(chunk: OutputChunk): string {
   switch (chunk.type) {
     case "stream":

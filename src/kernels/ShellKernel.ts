@@ -3,6 +3,7 @@ import {
   stripAnsi,
   kernelEnv,
   KernelCancelledError,
+  KernelExecutionError,
   KernelTimeoutError,
   raceWithCancellation,
 } from "./BaseKernel";
@@ -94,7 +95,7 @@ export class ShellKernel {
         if (text) onChunk({ type: "error", text: text + "\n" });
       });
 
-      proc.on("close", () => {
+      proc.on("close", (code, signalName) => {
         cleanup();
         this.current = null;
         if (settled) return;
@@ -104,6 +105,14 @@ export class ShellKernel {
           return;
         }
         this.executionCount++;
+        if (code !== 0) {
+          const detail = code === null
+            ? `Shell process exited after signal ${signalName ?? "unknown"}\n`
+            : `Shell process exited with code ${code}\n`;
+          onChunk({ type: "error", text: detail });
+          reject(new KernelExecutionError(detail.trim(), detail));
+          return;
+        }
         resolve();
       });
 

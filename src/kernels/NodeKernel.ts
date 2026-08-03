@@ -2,7 +2,7 @@ import { spawn } from "child_process";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { BaseKernel, RICH_SIGIL, SETUP_DONE_SIGIL, stripAnsi, kernelEnv } from "./BaseKernel";
+import { BaseKernel, ERROR_SIGIL, RICH_SIGIL, SETUP_DONE_SIGIL, stripAnsi, kernelEnv } from "./BaseKernel";
 
 // Delimiter marking the end of a job message sent over stdin.
 const CMD_END = "\x00NB_CMD\x00";
@@ -19,6 +19,7 @@ const CMD_END = "\x00NB_CMD\x00";
 const SETUP_SCRIPT = `
 const vm = require('vm');
 const RICH_SIGIL = ${JSON.stringify(RICH_SIGIL)};
+const ERROR_SIGIL = ${JSON.stringify(ERROR_SIGIL)};
 const CMD_END = ${JSON.stringify(CMD_END)};
 
 const __nb_ctx__ = vm.createContext(Object.assign({}, global, {
@@ -52,7 +53,9 @@ process.stdin.on('data', data => {
       const result = vm.runInContext(code, __nb_ctx__);
       if (result !== undefined) __nb_ctx__.__nb_display__(result);
     } catch (e) {
-      process.stderr.write((e.stack || String(e)) + '\\n');
+      const detail = e.stack || String(e);
+      const message = (e && e.message) ? String(e.message) : String(e);
+      process.stdout.write(ERROR_SIGIL + JSON.stringify({message, detail}) + '\\n');
     }
     process.stdout.write(sigil);
   }

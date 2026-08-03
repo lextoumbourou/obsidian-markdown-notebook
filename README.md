@@ -46,6 +46,7 @@ Comment markers are invisible in all standard Markdown renderers — including P
 - **Run All** — execute every cell in the note in order with a single command
 - **Notebook-scoped kernel state** — variables are shared between cells in one note but isolated from other notes
 - **Predictable relative paths** — every kernel starts in the note's folder, so `data.csv` and other relative paths work naturally
+- **Persistent failure diagnostics** — Python, Node.js, and R exceptions plus non-zero shell exits are marked as failed, with escaped tracebacks, stderr, and preceding output stored in the note
 - **Robust failure handling** — distinct ⏱ timeout state, runaway cells are interrupted on timeout, and output blocks left mid-run by a crash are repaired on next open
 - **Headless runner** — the `nb-run` CLI executes cells and updates outputs without Obsidian (publish pipelines, CI)
 - **Export-friendly** — outputs render correctly in Pelican, PDF, and any HTML-aware renderer
@@ -80,6 +81,10 @@ Optional but recommended for rich output:
 Click **▶ Run** on any supported language block in reading view. The `[N]` badge to the left of the button shows how many cells have executed since the kernel started.
 
 For notebook-wide execution, click **▶ Run all cells** at the top of the reading view. The toolbar reports the cell count and live progress while cells run in document order. While execution is active, the same button becomes **■ Stop** and interrupts the current cell without starting the remaining cells. Individual cell buttons behave the same way. Run all stops after the first error or timeout by default; disable **Stop on first error** in plugin settings to continue through independent cells. The same run action remains available from the command palette as **Markdown Notebook: Run all cells**.
+
+Language exceptions and non-zero shell exit codes produce `status="error"` output blocks. The failure marker is stored together with everything emitted before the failure and the escaped traceback or stderr, so diagnostics remain available after reopening the note.
+
+Shell commands such as `grep`, `diff`, and `test` commonly use non-zero exits for expected outcomes. Handle that status in the cell or append `|| true` when it should not fail the cell or stop Run All.
 
 ### Output formats
 
