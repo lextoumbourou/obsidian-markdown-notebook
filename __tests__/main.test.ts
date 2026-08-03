@@ -3,6 +3,14 @@ import { TFile, type Command } from 'obsidian';
 import { cancelRunAll, isRunAllActive, runAll } from '../src/RunAll';
 import { KernelCancelledError } from '../src/kernels/BaseKernel';
 
+async function waitUntil(predicate: () => boolean, description: string): Promise<void> {
+  const deadline = Date.now() + 2000;
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error(`Timed out waiting for ${description}`);
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+}
+
 describe('MarkdownNotebookPlugin', () => {
   it('registers the notebook-level Run All toolbar postprocessor', async () => {
     const plugin = new MarkdownNotebookPlugin({} as never, {} as never);
@@ -58,9 +66,10 @@ describe('MarkdownNotebookPlugin', () => {
 
     expect(command.editorCheckCallback!(true, editor as never, { file } as never)).toBe(true);
     expect(command.editorCheckCallback!(false, editor as never, { file } as never)).toBe(true);
-    for (let i = 0; i < 10 && kernel.execute.mock.calls.length === 0; i++) {
-      await new Promise((resolve) => setImmediate(resolve));
-    }
+    await waitUntil(
+      () => kernel.execute.mock.calls.length === 1 && !markdown.includes('status="running"'),
+      'the editor cell run to finish',
+    );
 
     expect(kernel.execute).toHaveBeenCalledWith(
       'print("from editor")', expect.any(Function), 30000, expect.any(AbortSignal),
@@ -170,17 +179,19 @@ describe('MarkdownNotebookPlugin', () => {
 
     expect(commands.get('run-all-cells-above-cursor')!
       .editorCheckCallback!(false, editor as never, { file } as never)).toBe(true);
-    for (let i = 0; i < 20 && isRunAllActive(file.path); i++) {
-      await new Promise((resolve) => setImmediate(resolve));
-    }
+    await waitUntil(
+      () => executed.length === 1 && !isRunAllActive(file.path),
+      'the cells-above run to finish',
+    );
     expect(executed).toEqual(['first']);
 
     executed.length = 0;
     expect(commands.get('run-cell-and-all-below-cursor')!
       .editorCheckCallback!(false, editor as never, { file } as never)).toBe(true);
-    for (let i = 0; i < 20 && isRunAllActive(file.path); i++) {
-      await new Promise((resolve) => setImmediate(resolve));
-    }
+    await waitUntil(
+      () => executed.length === 2 && !isRunAllActive(file.path),
+      'the cell-and-below run to finish',
+    );
     expect(executed).toEqual(['second', 'third']);
   });
 
@@ -214,13 +225,13 @@ describe('MarkdownNotebookPlugin', () => {
 
     expect(clearCell!.editorCheckCallback!(true, editor as never, { file } as never)).toBe(true);
     expect(clearCell!.editorCheckCallback!(false, editor as never, { file } as never)).toBe(true);
-    await new Promise((resolve) => setImmediate(resolve));
+    await waitUntil(() => !markdown.includes('hash="one"'), 'the cell output to clear');
     expect(markdown).not.toContain('hash="one"');
     expect(markdown).toContain('hash="two"');
 
     const clearAll = commands.get('clear-all-outputs');
     expect(clearAll!.checkCallback!(false)).toBe(true);
-    await new Promise((resolve) => setImmediate(resolve));
+    await waitUntil(() => !markdown.includes('<!-- nb-output'), 'all outputs to clear');
     expect(markdown).not.toContain('<!-- nb-output');
     expect(markdown).toContain('x = 1');
     expect(markdown).toContain('x = 2');
