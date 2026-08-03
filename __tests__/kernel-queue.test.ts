@@ -1,6 +1,10 @@
 import { EventEmitter } from "events";
 import type { ChildProcessWithoutNullStreams } from "child_process";
-import { BaseKernel, KernelTimeoutError } from "../src/kernels/BaseKernel";
+import {
+  BaseKernel,
+  KernelCancelledError,
+  KernelTimeoutError,
+} from "../src/kernels/BaseKernel";
 import { ShellKernel } from "../src/kernels/ShellKernel";
 import type { OutputChunk } from "../src/output/MimeRenderer";
 
@@ -105,6 +109,35 @@ class FakeKernel extends BaseKernel {
 }
 
 describe("BaseKernel queue recovery", () => {
+  it("rejects a stopped queued cell without waiting for the active cell", async () => {
+    const kernel = new FakeKernel();
+    const activeController = new AbortController();
+    const queuedController = new AbortController();
+    const active = kernel.execute("HANG", () => {}, 5000, activeController.signal);
+    const activeResult = active.catch((error) => error);
+    const queued = kernel.execute("ok", () => {}, 5000, queuedController.signal);
+
+    queuedController.abort();
+    await expect(queued).rejects.toBeInstanceOf(KernelCancelledError);
+
+    activeController.abort();
+    await expect(activeResult).resolves.toBeInstanceOf(KernelCancelledError);
+  });
+
+  it("stops the active cell and keeps the kernel usable", async () => {
+    const kernel = new FakeKernel();
+    const controller = new AbortController();
+    const running = kernel.execute("HANG", () => {}, 5000, controller.signal);
+
+    await new Promise((resolve) => setImmediate(resolve));
+    controller.abort();
+    await expect(running).rejects.toBeInstanceOf(KernelCancelledError);
+
+    const chunks: OutputChunk[] = [];
+    await kernel.execute("ok", (chunk) => chunks.push(chunk), 5000);
+    expect(chunks.some((chunk) => "text" in chunk && chunk.text.includes("ran"))).toBe(true);
+  });
+
   it("runs the next cell normally after a timeout", async () => {
     const kernel = new FakeKernel();
 
@@ -159,5 +192,33 @@ describe("timeout error type", () => {
     // created against the real global Error, not Jest's sandboxed one.
     expect(String(err)).toContain("ENOENT");
     expect(err).not.toBeInstanceOf(KernelTimeoutError);
+  });
+
+  it("ShellKernel rejects a stopped cell as cancellation", async () => {
+    const kernel = new ShellKernel("bash");
+    const controller = new AbortController();
+    const running = kernel.execute("sleep 5", () => {}, 5000, controller.signal);
+    setTimeout(() => controller.abort(), 25);
+
+    await expect(running).rejects.toBeInstanceOf(KernelCancelledError);
+    kernel.stop();
+  });
+
+  it("ShellKernel force-kills a signal-ignoring cell so the queue recovers", async () => {
+    const kernel = new ShellKernel("bash");
+    const controller = new AbortController();
+    const running = kernel.execute(
+      "trap '' INT TERM; while :; do :; done",
+      () => {},
+      10000,
+      controller.signal,
+    );
+    setTimeout(() => controller.abort(), 25);
+    await expect(running).rejects.toBeInstanceOf(KernelCancelledError);
+
+    const chunks: OutputChunk[] = [];
+    await kernel.execute("echo recovered", (chunk) => chunks.push(chunk), 4000);
+    expect(chunks.some((chunk) => "text" in chunk && chunk.text.includes("recovered"))).toBe(true);
+    kernel.stop();
   });
 });

@@ -1,6 +1,7 @@
 import { TFile } from 'obsidian';
 import {
   activateRunAll,
+  cancelRunAll,
   disposeRunAll,
   parseRunBlocks,
   runAll,
@@ -263,6 +264,94 @@ describe('runAll', () => {
 
     expect(second.skipped).toBe(true);
     expect(calls).toBe(1);
+  });
+
+  it('stops the active cell and does not run remaining cells', async () => {
+    const memory = memoryNotebook(notebook('print("done")', 'print("held")', 'print("never")'));
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => { markStarted = resolve; });
+    const executed: string[] = [];
+    const onCancel = jest.fn();
+    const kernel = {
+      executionCount: 0,
+      execute(
+        source: string,
+        onChunk: (chunk: unknown) => void,
+        _timeout: number,
+        signal?: AbortSignal,
+      ) {
+        executed.push(source);
+        if (source === 'print("done")') {
+          onChunk({ type: 'stream', stream: 'stdout', text: 'done\n' });
+          return Promise.resolve();
+        }
+        markStarted();
+        return new Promise<void>((_resolve, reject) => {
+          signal?.addEventListener('abort', () => reject(new Error('stopped')), { once: true });
+        });
+      },
+    };
+
+    const running = runAll(
+      memory.app as never,
+      memory.file,
+      () => kernel as never,
+      DEFAULT_SETTINGS,
+      { onCancel },
+    );
+    await started;
+    expect(cancelRunAll(memory.file.path)).toBe(true);
+    const result = await running;
+
+    expect(result).toEqual({ total: 3, succeeded: 1, failed: 0, skipped: true });
+    expect(executed).toEqual(['print("done")', 'print("held")']);
+    expect(onCancel).toHaveBeenCalledWith({ current: 2, total: 3 });
+    expect(memory.content().match(/<!-- nb-output/g)).toHaveLength(1);
+    expect(memory.content()).toContain('done');
+  });
+
+  it('stops remaining output writes when cancelled during the write phase', async () => {
+    const memory = memoryNotebook(notebook('print("one")', 'print("two")'));
+    let releaseWrite!: () => void;
+    let markWriteStarted!: () => void;
+    const writeGate = new Promise<void>((resolve) => { releaseWrite = resolve; });
+    const writeStarted = new Promise<void>((resolve) => { markWriteStarted = resolve; });
+    let writes = 0;
+    memory.app.vault.process.mockImplementation(
+      async (_file: TFile, transform: (raw: string) => string) => {
+        writes += 1;
+        if (writes === 1) {
+          markWriteStarted();
+          await writeGate;
+        }
+        memory.setContent(transform(memory.content()));
+      },
+    );
+    const kernel = {
+      executionCount: 0,
+      async execute(source: string, onChunk: (chunk: unknown) => void) {
+        this.executionCount += 1;
+        onChunk({ type: 'stream', stream: 'stdout', text: `${source}\n` });
+      },
+    };
+    const onCancel = jest.fn();
+
+    const running = runAll(
+      memory.app as never,
+      memory.file,
+      () => kernel as never,
+      DEFAULT_SETTINGS,
+      { onCancel },
+    );
+    await writeStarted;
+    expect(cancelRunAll(memory.file.path)).toBe(true);
+    releaseWrite();
+    const result = await running;
+
+    expect(result).toEqual({ total: 2, succeeded: 2, failed: 0, skipped: true });
+    expect(writes).toBe(1);
+    expect(onCancel).toHaveBeenCalledWith({ current: 2, total: 2 });
+    expect(memory.content()).not.toContain('<!-- nb-output');
   });
 
   it('marks a cell failed when it was edited before its output could be saved', async () => {

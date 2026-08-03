@@ -15,6 +15,40 @@ export class KernelTimeoutError extends Error {
   }
 }
 
+/** Thrown when the user stops a queued or running cell. */
+export class KernelCancelledError extends Error {
+  constructor() {
+    super("Execution stopped");
+    this.name = "KernelCancelledError";
+  }
+}
+
+/** Reject immediately when a queued operation is cancelled, while leaving the
+ * underlying operation attached to the kernel's serialization queue. */
+export function raceWithCancellation<T>(
+  operation: Promise<T>,
+  signal?: AbortSignal,
+): Promise<T> {
+  if (!signal) return operation;
+  if (signal.aborted) return Promise.reject(new KernelCancelledError());
+
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const finish = (callback: () => void) => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener("abort", onAbort);
+      callback();
+    };
+    const onAbort = () => finish(() => reject(new KernelCancelledError()));
+    signal.addEventListener("abort", onAbort, { once: true });
+    operation.then(
+      (value) => finish(() => resolve(value)),
+      (error) => finish(() => reject(error)),
+    );
+  });
+}
+
 /**
  * Return a process env with common binary directories prepended to PATH.
  * Obsidian launched from the Dock doesn't inherit the user's shell PATH,
@@ -76,29 +110,34 @@ export abstract class BaseKernel {
   execute(
     code: string,
     onChunk: (chunk: OutputChunk) => void,
-    timeoutMs: number
+    timeoutMs: number,
+    signal?: AbortSignal,
   ): Promise<void> {
-    const run = this.execQueue.then(() =>
-      this.doExecute(code, onChunk, timeoutMs)
-    );
+    const execution = this.execQueue.then(() => {
+      if (signal?.aborted) throw new KernelCancelledError();
+      return this.doExecute(code, onChunk, timeoutMs, signal);
+    });
     // The queue must survive a failed execution: keep chaining on a settled
     // promise while the caller still observes the rejection via `run`.
-    this.execQueue = run.then(
+    this.execQueue = execution.then(
       () => undefined,
       () => undefined
     );
-    return run;
+    return raceWithCancellation(execution, signal);
   }
 
   private async doExecute(
     code: string,
     onChunk: (chunk: OutputChunk) => void,
-    timeoutMs: number
+    timeoutMs: number,
+    signal?: AbortSignal,
   ): Promise<void> {
     // A previous cell may have timed out and still be flushing output;
     // wait for it to wind down so its output can't bleed into this run.
     if (this.pendingDrain) await this.pendingDrain;
+    if (signal?.aborted) throw new KernelCancelledError();
     await this.ensureStarted();
+    if (signal?.aborted) throw new KernelCancelledError();
     if (!this.process) throw new Error("Kernel not running");
 
     const finishSigil = `__NB_DONE_${Date.now()}_${Math.random().toString(36).slice(2)}__`;
@@ -115,23 +154,32 @@ export abstract class BaseKernel {
         clearTimeout(timer);
         this.process?.stdout.removeListener("data", onStdout);
         this.process?.stderr.removeListener("data", onStderr);
+        signal?.removeEventListener("abort", onAbort);
         this.executionCount++;
         resolve();
       };
 
-      const timer = setTimeout(() => {
+      const rejectInterrupted = (error: Error) => {
         if (done) return;
         done = true;
+        clearTimeout(timer);
         this.process?.stdout.removeListener("data", onStdout);
         this.process?.stderr.removeListener("data", onStderr);
-        // Interrupt the runaway cell and discard its late output so it
-        // doesn't bleed into the next execution. If the interrupt doesn't
-        // take, the drain kills the kernel so the next run starts fresh.
+        signal?.removeEventListener("abort", onAbort);
         this.interrupt();
         this.pendingDrain = this.drainStale(finishSigil).finally(() => {
           this.pendingDrain = null;
         });
-        reject(new KernelTimeoutError(timeoutMs));
+        reject(error);
+      };
+
+      const onAbort = () => rejectInterrupted(new KernelCancelledError());
+
+      const timer = setTimeout(() => {
+        // Interrupt the runaway cell and discard its late output so it
+        // doesn't bleed into the next execution. If the interrupt doesn't
+        // take, the drain kills the kernel so the next run starts fresh.
+        rejectInterrupted(new KernelTimeoutError(timeoutMs));
       }, timeoutMs);
 
       const onStdout = (data: Buffer) => {
@@ -191,6 +239,11 @@ export abstract class BaseKernel {
 
       this.process!.stdout.on("data", onStdout);
       this.process!.stderr.on("data", onStderr);
+      signal?.addEventListener("abort", onAbort, { once: true });
+      if (signal?.aborted) {
+        onAbort();
+        return;
+      }
       this.process!.stdin.write(wrapped);
     });
   }

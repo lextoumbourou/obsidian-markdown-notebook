@@ -1,5 +1,11 @@
 import { ChildProcessWithoutNullStreams, spawn } from "child_process";
-import { stripAnsi, kernelEnv, KernelTimeoutError } from "./BaseKernel";
+import {
+  stripAnsi,
+  kernelEnv,
+  KernelCancelledError,
+  KernelTimeoutError,
+  raceWithCancellation,
+} from "./BaseKernel";
 import type { OutputChunk } from "../output/MimeRenderer";
 
 /**
@@ -24,32 +30,53 @@ export class ShellKernel {
   execute(
     code: string,
     onChunk: (chunk: OutputChunk) => void,
-    timeoutMs: number
+    timeoutMs: number,
+    signal?: AbortSignal,
   ): Promise<void> {
-    const run = this.execQueue.then(() =>
-      this.doExecute(code, onChunk, timeoutMs)
-    );
+    const execution = this.execQueue.then(() => {
+      if (signal?.aborted) throw new KernelCancelledError();
+      return this.doExecute(code, onChunk, timeoutMs, signal);
+    });
     // The queue must survive a failed execution: keep chaining on a settled
     // promise while the caller still observes the rejection via `run`.
-    this.execQueue = run.then(
+    this.execQueue = execution.then(
       () => undefined,
       () => undefined
     );
-    return run;
+    return raceWithCancellation(execution, signal);
   }
 
   private doExecute(
     code: string,
     onChunk: (chunk: OutputChunk) => void,
-    timeoutMs: number
+    timeoutMs: number,
+    signal?: AbortSignal,
   ): Promise<void> {
+    if (signal?.aborted) return Promise.reject(new KernelCancelledError());
     return new Promise<void>((resolve, reject) => {
       const proc = spawn(this.shellPath, ["-c", code], { env: kernelEnv() });
       this.current = proc;
       let settled = false;
+      let cancelled = false;
+      let forceKillTimer: ReturnType<typeof setTimeout> | null = null;
+
+      const cleanup = () => {
+        clearTimeout(timer);
+        if (forceKillTimer) clearTimeout(forceKillTimer);
+        signal?.removeEventListener("abort", onAbort);
+      };
+
+      const onAbort = () => {
+        if (settled || cancelled) return;
+        cancelled = true;
+        clearTimeout(timer);
+        proc.kill("SIGINT");
+        forceKillTimer = setTimeout(() => proc.kill("SIGKILL"), 1000);
+      };
 
       const timer = setTimeout(() => {
         settled = true;
+        cleanup();
         proc.kill();
         reject(new KernelTimeoutError(timeoutMs));
       }, timeoutMs);
@@ -65,21 +92,32 @@ export class ShellKernel {
       });
 
       proc.on("close", () => {
-        clearTimeout(timer);
+        cleanup();
         this.current = null;
         if (settled) return;
         settled = true;
+        if (cancelled) {
+          reject(new KernelCancelledError());
+          return;
+        }
         this.executionCount++;
         resolve();
       });
 
       proc.on("error", (err) => {
-        clearTimeout(timer);
+        cleanup();
         this.current = null;
         if (settled) return;
         settled = true;
+        if (cancelled) {
+          reject(new KernelCancelledError());
+          return;
+        }
         reject(err);
       });
+
+      signal?.addEventListener("abort", onAbort, { once: true });
+      if (signal?.aborted) onAbort();
     });
   }
 

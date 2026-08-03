@@ -18,8 +18,12 @@
 }
 
 .nb-run-button.nb-run-button--running {
-  opacity: 0.6;
-  cursor: not-allowed;
+  background: var(--color-red);
+  cursor: pointer;
+}
+
+.nb-run-button.nb-run-button--running:hover {
+  filter: brightness(1.1);
 }
 
 .nb-run-button.nb-run-button--stale {
@@ -213,6 +217,11 @@
 .nb-run-all-button:disabled {
   opacity: 0.65;
   cursor: progress;
+}
+
+.nb-run-all-button[data-running="true"] {
+  border-color: var(--color-red);
+  background: var(--color-red);
 }
 
 .nb-run-all-status {

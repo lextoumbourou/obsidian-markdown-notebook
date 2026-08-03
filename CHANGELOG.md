@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- Active **Run** and **Run all cells** buttons now become red **Stop** buttons, allowing the current cell or notebook-wide run to be interrupted without executing queued cells
+
 ## [0.3.0] - 2026-07-28
 
 ### Added

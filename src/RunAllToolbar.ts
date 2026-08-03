@@ -1,6 +1,7 @@
 import { App, MarkdownPostProcessorContext, Notice, TFile } from "obsidian";
 import { parseRunBlocks } from "./CellParser";
 import {
+  cancelRunAll,
   getRunAllProgress,
   runAll,
   RunAllHooks,
@@ -62,11 +63,13 @@ function updateToolbar(toolbar: HTMLElement, state: RunAllProgress): void {
   const total = state.total ?? Number(toolbar.dataset.cellCount ?? 0);
   toolbar.dataset.cellCount = String(total);
   if (state.running) {
-    button.disabled = true;
-    button.textContent = "● Running";
+    button.disabled = false;
+    button.dataset.running = "true";
+    button.textContent = "■ Stop";
     status.textContent = `Running ${state.current} / ${total}`;
   } else {
     button.disabled = false;
+    delete button.dataset.running;
     button.textContent = "▶ Run all cells";
     status.textContent = cellCountLabel(total);
   }
@@ -86,6 +89,8 @@ export function runAllToolbarHooks(sourcePath: string): RunAllHooks {
       setRunAllToolbarState(sourcePath, { running: true, current, total }),
     onComplete: ({ total }) =>
       setRunAllToolbarState(sourcePath, { running: false, current: total, total }),
+    onCancel: ({ current, total }) =>
+      setRunAllToolbarState(sourcePath, { running: false, current, total }),
   };
 }
 
@@ -226,6 +231,11 @@ async function renderToolbarInHost(
       host.prepend(toolbar);
 
       button.addEventListener("click", async () => {
+        if (cancelRunAll(sourcePath)) {
+          button.disabled = true;
+          button.textContent = "■ Stopping…";
+          return;
+        }
         const currentFile = context.app.vault.getAbstractFileByPath(sourcePath);
         if (!isMarkdownFile(currentFile)) {
           new Notice("No active Markdown file.");

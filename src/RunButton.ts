@@ -11,6 +11,7 @@ import {
   imageLink,
   OutputFormat,
   ERROR_HTML,
+  INTERRUPTED_HTML,
   timeoutHtml,
 } from "./OutputBlock";
 import {
@@ -20,7 +21,7 @@ import {
   OutputChunk,
 } from "./output/MimeRenderer";
 import { renderHtmlToPng } from "./output/HtmlToImage";
-import { KernelTimeoutError } from "./kernels/BaseKernel";
+import { KernelCancelledError, KernelTimeoutError } from "./kernels/BaseKernel";
 import type { BaseKernel } from "./kernels/BaseKernel";
 import type { ShellKernel } from "./kernels/ShellKernel";
 import type { PluginSettings } from "./settings/Settings";
@@ -34,6 +35,36 @@ const RUNNING_HTML = `<div class="nb-status-running"><span class="nb-status-spin
 /** Cells currently executing, keyed by `${sourcePath}::${hash}`. Lets the
  * stale-block cleanup distinguish a live spinner from a crash leftover. */
 const inFlight = new Set<string>();
+
+type CellRunPhase = "running" | "stopping" | "finishing";
+
+interface ActiveCellRun {
+  controller: AbortController;
+  phase: CellRunPhase;
+  buttons: Set<HTMLButtonElement>;
+}
+
+const activeCellRuns = new Map<string, ActiveCellRun>();
+
+function updateCellRunButtons(run: ActiveCellRun): void {
+  for (const button of run.buttons) {
+    button.classList.add("nb-run-button--running");
+    button.disabled = run.phase !== "running";
+    button.setText(
+      run.phase === "running"
+        ? "■ Stop"
+        : run.phase === "stopping" ? "■ Stopping…" : "Finishing…"
+    );
+  }
+}
+
+function resetCellRunButtons(run: ActiveCellRun): void {
+  for (const button of run.buttons) {
+    button.classList.remove("nb-run-button--running");
+    button.disabled = false;
+    button.setText("▶ Run");
+  }
+}
 
 export function isCellInFlight(sourcePath: string, hash: string): boolean {
   return inFlight.has(`${sourcePath}::${hash}`);
@@ -90,6 +121,7 @@ export async function processCodeBlock(
   const kernel = context.getKernel(language);
   const pre = renderPlainCodeBlock(src, el, language);
   const hash = await hashCodeFence(language, src);
+  const flightKey = `${ctx.sourcePath}::${hash}`;
 
   const buttonWrap = pre.createDiv({ cls: "nb-run-button-wrap" });
   const countBadge = buttonWrap.createEl("span", {
@@ -100,13 +132,31 @@ export async function processCodeBlock(
     cls: "nb-run-button",
     text: "▶ Run",
   });
+  const existingRun = activeCellRuns.get(flightKey);
+  if (existingRun) {
+    existingRun.buttons.add(button);
+    updateCellRunButtons(existingRun);
+  }
 
   button.addEventListener("click", async () => {
-    if (button.classList.contains("nb-run-button--running")) return;
-    button.classList.add("nb-run-button--running");
-    button.setText("● Running");
+    const activeRun = activeCellRuns.get(flightKey);
+    if (activeRun) {
+      if (activeRun.phase === "running") {
+        activeRun.phase = "stopping";
+        activeRun.controller.abort();
+        updateCellRunButtons(activeRun);
+      }
+      return;
+    }
+    const controller = new AbortController();
+    const run: ActiveCellRun = {
+      controller,
+      phase: "running",
+      buttons: new Set([button]),
+    };
+    activeCellRuns.set(flightKey, run);
+    updateCellRunButtons(run);
 
-    const flightKey = `${ctx.sourcePath}::${hash}`;
     inFlight.add(flightKey);
     try {
       // Re-read section info at click time so args are never stale.
@@ -149,42 +199,75 @@ export async function processCodeBlock(
         }
       }
 
-      let failure: "error" | "timeout" | null = null;
+      let failure: "error" | "timeout" | "cancelled" | null = null;
       try {
         await kernel.execute(src, (chunk) => {
           chunks.push(chunk);
           appendChunkToElement(liveEl, chunk);
-        }, timeout);
+        }, timeout, controller.signal);
+        run.phase = "finishing";
+        updateCellRunButtons(run);
       } catch (err) {
-        failure = err instanceof KernelTimeoutError ? "timeout" : "error";
-        const msg = err instanceof Error ? err.message : String(err);
-        chunks.push({ type: "error", text: msg });
-        appendChunkToElement(liveEl, { type: "error", text: msg });
-        new Notice(`Notebook: ${msg}`);
+        failure = err instanceof KernelCancelledError
+          ? "cancelled"
+          : err instanceof KernelTimeoutError ? "timeout" : "error";
+        if (failure === "cancelled") {
+          new Notice("Notebook: execution stopped.");
+        } else {
+          const msg = err instanceof Error ? err.message : String(err);
+          chunks.push({ type: "error", text: msg });
+          appendChunkToElement(liveEl, { type: "error", text: msg });
+          new Notice(`Notebook: ${msg}`);
+        }
       }
 
       if (sectionInfo && file instanceof TFile) {
         if (failure) {
-          const statusHtml = failure === "timeout" ? timeoutHtml(timeout) : ERROR_HTML;
+          const statusHtml = failure === "cancelled"
+            ? INTERRUPTED_HTML
+            : failure === "timeout" ? timeoutHtml(timeout) : ERROR_HTML;
           try {
-            await writeOutputBlock(app, file, cell, hash, statusHtml, pendingFormat, runArgs.id, failure);
+            await writeOutputBlock(
+              app, file, cell, hash, statusHtml, pendingFormat, runArgs.id,
+              failure === "cancelled" ? "error" : failure,
+            );
           } catch (err) {
             console.error("[MarkdownNotebook] Failed to write error block:", err);
           }
         } else {
           try {
             const { content, format } = await buildOutput(
-              app, file, hash, chunks, runArgs, settings, fm
+              app, file, hash, chunks, runArgs, settings, fm,
+              () => {
+                if (controller.signal.aborted) throw new KernelCancelledError();
+              },
             );
-            await writeOutputBlock(app, file, cell, hash, content, format, runArgs.id);
+            await writeOutputBlock(
+              app, file, cell, hash, content, format, runArgs.id, undefined,
+              () => {
+                if (controller.signal.aborted) throw new KernelCancelledError();
+              },
+            );
           } catch (err) {
-            console.error("[MarkdownNotebook] Failed to write output block:", err);
-            // Never leave the "running" placeholder behind — degrade to an
-            // error block so the file doesn't show a spinner forever.
-            try {
-              await writeOutputBlock(app, file, cell, hash, ERROR_HTML, pendingFormat, runArgs.id, "error");
-            } catch {
-              // file write is failing entirely; nothing more we can do
+            if (err instanceof KernelCancelledError) {
+              try {
+                await writeOutputBlock(
+                  app, file, cell, hash, INTERRUPTED_HTML, pendingFormat,
+                  runArgs.id, "error",
+                );
+              } catch {
+                // file write is failing entirely; nothing more we can do
+              }
+              new Notice("Notebook: execution stopped.");
+            } else {
+              console.error("[MarkdownNotebook] Failed to write output block:", err);
+              // Never leave the "running" placeholder behind — degrade to an
+              // error block so the file doesn't show a spinner forever.
+              try {
+                await writeOutputBlock(app, file, cell, hash, ERROR_HTML, pendingFormat, runArgs.id, "error");
+              } catch {
+                // file write is failing entirely; nothing more we can do
+              }
             }
           }
         }
@@ -193,8 +276,8 @@ export async function processCodeBlock(
       liveEl.remove();
     } finally {
       inFlight.delete(flightKey);
-      button.classList.remove("nb-run-button--running");
-      button.setText("▶ Run");
+      if (activeCellRuns.get(flightKey) === run) activeCellRuns.delete(flightKey);
+      resetCellRunButtons(run);
       countBadge.textContent = `[${context.getKernel(language).executionCount}]`;
     }
   });
@@ -208,7 +291,9 @@ async function buildOutput(
   runArgs: RunArgs,
   settings: PluginSettings,
   fm: NotebookFrontmatter,
+  assertActive: () => void,
 ): Promise<{ content: string; format: OutputFormat }> {
+  assertActive();
   const outputFormat = runArgs.format ?? fm.format ?? settings.defaultFormat;
   const mediaPath = fm.media ?? settings.mediaPath;
   const markdownLinks = fm.markdownLinks ?? settings.markdownImageLinks;
@@ -217,12 +302,15 @@ async function buildOutput(
     // Prefer native image data (matplotlib, R plots, etc.)
     const imgData = extractImageData(chunks) ??
       await renderHtmlToPng(renderChunksToHtml(chunks));
+    assertActive();
     if (imgData) {
       const { filename, vaultPath } = await saveImageToVault(
-        app, file, runArgs.id, hash, imgData, mediaPath
+        app, file, runArgs.id, hash, imgData, mediaPath, assertActive,
       );
+      assertActive();
       return { content: imageLink(filename, vaultPath, file, markdownLinks), format: "image" };
     }
   }
+  assertActive();
   return { content: renderChunksToHtml(chunks), format: "html" };
 }

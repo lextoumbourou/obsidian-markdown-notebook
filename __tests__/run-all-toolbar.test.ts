@@ -329,5 +329,10 @@ describe('Run All toolbar', () => {
     runAllToolbarHooks(file.path).onProgress?.({ current: 1, total: 1 });
     expect(firstPreview.querySelector('.nb-run-all-status')?.textContent).toBe('Running 1 / 1');
     expect(secondPreview.querySelector('.nb-run-all-status')?.textContent).toBe('Running 1 / 1');
+    expect(firstPreview.querySelector('.nb-run-all-button')?.textContent).toBe('■ Stop');
+    expect(secondPreview.querySelector('.nb-run-all-button')?.disabled).toBe(false);
+
+    runAllToolbarHooks(file.path).onCancel?.({ current: 0, total: 1 });
+    expect(firstPreview.querySelector('.nb-run-all-button')?.textContent).toBe('▶ Run all cells');
   });
 });
