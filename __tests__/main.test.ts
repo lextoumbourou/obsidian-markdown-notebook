@@ -83,9 +83,14 @@ describe('MarkdownNotebookPlugin', () => {
     file.path = 'Notebook.md';
     Object.assign(file, { extension: 'md', parent: { path: '' } });
     let markdown = '```python\nwhile True: pass\n```';
+    let markInterruptedPersisted!: () => void;
+    const interruptedPersisted = new Promise<void>((resolve) => {
+      markInterruptedPersisted = resolve;
+    });
     (plugin.app.vault.process as jest.Mock).mockImplementation(
       async (_file: TFile, transform: (raw: string) => string) => {
         markdown = transform(markdown);
+        if (markdown.includes('Execution was interrupted')) markInterruptedPersisted();
       },
     );
     let markStarted!: () => void;
@@ -118,9 +123,7 @@ describe('MarkdownNotebookPlugin', () => {
     expect(markdown).toContain('status="running"');
 
     expect(command.editorCheckCallback!(false, editor as never, { file } as never)).toBe(true);
-    for (let i = 0; i < 10 && markdown.includes('status="running"'); i++) {
-      await new Promise((resolve) => setImmediate(resolve));
-    }
+    await interruptedPersisted;
 
     expect(kernel.execute).toHaveBeenCalledTimes(1);
     expect(markdown).toContain('status="error"');
