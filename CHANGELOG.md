@@ -8,6 +8,7 @@
 - Kernels now use the note's folder as their working directory, making relative file access predictable; `notebook.cwd` can select a note-relative directory, an absolute path, or the vault root with `/`/`vault`
 - Per-note `notebook.python`, `notebook.node`, `notebook.shell`, and `notebook.r` executable overrides, with relative executable paths resolved from the note's folder
 - Persistent failure diagnostics: Python, Node.js, and R exceptions and non-zero shell exits now store the failure marker together with preceding output and an escaped traceback/stderr
+- **Clear current cell output** and **Clear all outputs in active note** commands; clearing removes persisted `nb-output` blocks while retaining image attachments and is blocked during active execution
 
 ### Changed
 - **Interrupt kernel** now targets kernels belonging to the active note; **Restart all kernels** and plugin unload clean up every notebook-scoped session
@@ -16,6 +17,8 @@
 - Relative executable paths in global plugin settings resolve from the vault root; relative frontmatter executable paths remain note-relative
 
 ### Fixed
+- Persisted output containing a line that looks like an executable code fence no longer creates phantom cells or hides later cells from Run All, toolbar counts, output writes, or Clear All
+- **Clear current cell output** is now available when the editor cursor is inside the cell's attached output block, not only inside its code fence
 - `nb-run` now gives `notebook.cwd: /` and `notebook.cwd: vault` the same vault-root meaning as the plugin, discovering the nearest `.obsidian` directory or requiring `--vault-root` instead of silently running from the filesystem root or a nonexistent `vault` subfolder
 - Rendering a code block or execution-count badge no longer creates, replaces, or throws from kernel acquisition, so Canvas, exports, and third-party Markdown rendering can display cells without a resolvable source file
 - Replacing or shutting down an active Python, Node.js, R, or shell kernel now settles the cell immediately as cancelled instead of leaving it stuck until its execution timeout

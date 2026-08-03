@@ -2,6 +2,7 @@ import { App, TFile } from "obsidian";
 import {
   applyOutputBlock,
   removeOutputBlock,
+  removeAllOutputBlocks,
   applyStaleRunningCleanup,
   CellLocator,
   findCellFenceEnd,
@@ -62,8 +63,26 @@ export async function clearOutputBlock(
   app: App,
   file: TFile,
   cell: CellLocator
-): Promise<void> {
-  await app.vault.process(file, (raw) => removeOutputBlock(raw, cell));
+): Promise<boolean> {
+  let removed = false;
+  await app.vault.process(file, (raw) => {
+    const updated = removeOutputBlock(raw, cell);
+    removed = updated !== raw;
+    return updated;
+  });
+  return removed;
+}
+
+/** Clear every persisted output block in a note. Saved image attachments are
+ * deliberately retained because they may be referenced elsewhere. */
+export async function clearAllOutputBlocks(app: App, file: TFile): Promise<boolean> {
+  let removed = false;
+  await app.vault.process(file, (raw) => {
+    const updated = removeAllOutputBlocks(raw);
+    removed = updated !== raw;
+    return updated;
+  });
+  return removed;
 }
 
 /**

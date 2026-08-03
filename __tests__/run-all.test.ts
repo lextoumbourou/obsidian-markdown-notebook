@@ -9,6 +9,7 @@ import {
 import { DEFAULT_SETTINGS } from '../src/settings/Settings';
 import { KernelTimeoutError } from '../src/kernels/BaseKernel';
 import * as HtmlToImage from '../src/output/HtmlToImage';
+import { findRunBlockAtLine } from '../src/CellParser';
 
 type RunAllResult = {
   total: number;
@@ -66,6 +67,30 @@ describe('parseRunBlocks', () => {
   it('returns empty array for content with no supported language blocks', () => {
     const content = '# Heading\n\nSome text\n\n```ruby\nx = 1\n```\n';
     expect(parseRunBlocks(content)).toEqual([]);
+  });
+
+  it('finds the executable cell under an editor cursor', () => {
+    const content = ['# title', '', '```python', 'x = 1', '```', '', 'after'].join('\n');
+    expect(findRunBlockAtLine(content, 2)?.source).toBe('x = 1');
+    expect(findRunBlockAtLine(content, 3)?.lineStart).toBe(2);
+    expect(findRunBlockAtLine(content, 4)?.lineEnd).toBe(4);
+    expect(findRunBlockAtLine(content, 1)).toBeNull();
+    expect(findRunBlockAtLine(content, 6)).toBeNull();
+  });
+
+  it('finds the owning cell when the cursor is inside its attached output', () => {
+    const content = [
+      '```python', 'x = 1', '```', '',
+      '<!-- nb-output hash="abc" format="html" -->',
+      '<pre>1</pre>',
+      '<!-- /nb-output -->',
+      'after',
+    ].join('\n');
+
+    expect(findRunBlockAtLine(content, 4)?.source).toBe('x = 1');
+    expect(findRunBlockAtLine(content, 5)?.source).toBe('x = 1');
+    expect(findRunBlockAtLine(content, 6)?.source).toBe('x = 1');
+    expect(findRunBlockAtLine(content, 7)).toBeNull();
   });
 
   it('parses a plain python block without any args', () => {
@@ -171,6 +196,25 @@ describe('parseRunBlocks', () => {
     expect(blocks).toHaveLength(2);
     expect(blocks[0].source).toBe('x = 1');
     expect(blocks[1].source).toBe('y = 2');
+  });
+
+  it('ignores executable fence-like lines inside persisted output', () => {
+    const content = [
+      '```python', 'print("first")', '```',
+      '<!-- nb-output hash="abc" format="html" -->',
+      '<pre>x',
+      '```python',
+      'y</pre>',
+      '<!-- /nb-output -->',
+      '```python', 'print("second")', '```',
+    ].join('\n');
+
+    const blocks = parseRunBlocks(content);
+    expect(blocks).toHaveLength(2);
+    expect(blocks.map((block) => block.source)).toEqual([
+      'print("first")',
+      'print("second")',
+    ]);
   });
 });
 

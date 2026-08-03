@@ -6,9 +6,15 @@ import { NodeKernel } from "./kernels/NodeKernel";
 import { ShellKernel } from "./kernels/ShellKernel";
 import { RKernel } from "./kernels/RKernel";
 import { BaseKernel } from "./kernels/BaseKernel";
-import { processCodeBlock, RunButtonContext, isCellInFlight } from "./RunButton";
-import { activateRunAll, disposeRunAll, runAll } from "./RunAll";
-import { clearStaleRunningBlocks } from "./OutputBlock";
+import {
+  processCodeBlock,
+  RunButtonContext,
+  hasActiveCellRun,
+  isCellInFlight,
+} from "./RunButton";
+import { activateRunAll, disposeRunAll, isRunAllActive, runAll } from "./RunAll";
+import { clearAllOutputBlocks, clearOutputBlock, clearStaleRunningBlocks } from "./OutputBlock";
+import { findRunBlockAtLine, type RunBlock } from "./CellParser";
 import { SUPPORTED_LANGUAGES, LANG_ALIASES } from "./languages";
 import { readNotebookFrontmatter } from "./NotebookFrontmatter";
 import {
@@ -156,6 +162,30 @@ export default class MarkdownNotebookPlugin extends Plugin {
         );
       },
     });
+
+    this.addCommand({
+      id: "clear-cell-output",
+      name: "Clear current cell output",
+      editorCheckCallback: (checking, editor, ctx) => {
+        const file = ctx.file;
+        if (!(file instanceof TFile)) return false;
+        const block = findRunBlockAtLine(editor.getValue(), editor.getCursor().line);
+        if (!block) return false;
+        if (!checking) void this.clearCellOutput(file, block);
+        return true;
+      },
+    });
+
+    this.addCommand({
+      id: "clear-all-outputs",
+      name: "Clear all outputs in active note",
+      checkCallback: (checking) => {
+        const file = this.app.workspace.getActiveViewOfType(MarkdownView)?.file;
+        if (!(file instanceof TFile)) return false;
+        if (!checking) void this.clearAllOutputs(file);
+        return true;
+      },
+    });
   }
 
   onunload() {
@@ -227,6 +257,42 @@ export default class MarkdownNotebookPlugin extends Plugin {
       if (!openPaths.has(session.config.notePath)) {
         this.stopSessionsForNote(session.config.notePath);
       }
+    }
+  }
+
+  private canClearOutputs(file: TFile): boolean {
+    if (hasActiveCellRun(file.path) || isRunAllActive(file.path)) {
+      new Notice("Notebook: stop execution before clearing outputs.");
+      return false;
+    }
+    return true;
+  }
+
+  private async clearCellOutput(file: TFile, block: RunBlock): Promise<void> {
+    if (!this.canClearOutputs(file)) return;
+    try {
+      const removed = await clearOutputBlock(this.app, file, {
+        language: block.language,
+        source: block.source,
+        hintLine: block.lineEnd,
+      });
+      new Notice(removed ? "Cell output cleared." : "This cell has no output.");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("[MarkdownNotebook] Failed to clear cell output:", err);
+      new Notice(`Notebook: output could not be cleared: ${msg}`);
+    }
+  }
+
+  private async clearAllOutputs(file: TFile): Promise<void> {
+    if (!this.canClearOutputs(file)) return;
+    try {
+      const removed = await clearAllOutputBlocks(this.app, file);
+      new Notice(removed ? "All outputs cleared." : "This note has no outputs.");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("[MarkdownNotebook] Failed to clear note outputs:", err);
+      new Notice(`Notebook: outputs could not be cleared: ${msg}`);
     }
   }
 

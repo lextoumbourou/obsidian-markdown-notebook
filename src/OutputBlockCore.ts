@@ -1,4 +1,4 @@
-import { canonicalLang } from "./languages";
+import { NB_OUTPUT_END_RE, NB_OUTPUT_RE, parseRunBlocks } from "./CellParser";
 
 /**
  * Pure output-block logic shared by the Obsidian plugin and the CLI runner.
@@ -34,9 +34,6 @@ export interface OutputBlock {
   lineEnd: number;   // line index of <!-- /nb-output -->
 }
 
-const NB_OUTPUT_RE = /^<!-- nb-output (.*?)-->$/;
-const NB_OUTPUT_END = /^<!-- \/nb-output -->$/;
-
 export const INTERRUPTED_HTML = `<div class="nb-status-error">Execution was interrupted</div>`;
 export const ERROR_HTML = `<div class="nb-status-error">Execution failed</div>`;
 
@@ -62,21 +59,12 @@ function splitFileLines(raw: string): { lines: string[]; eol: string } {
  */
 export function findCellFenceEnd(lines: string[], cell: CellLocator): number | null {
   const target = cell.source.replace(/\r\n/g, "\n").replace(/\n$/, "");
-  const matches: number[] = [];
-  let i = 0;
-  while (i < lines.length) {
-    const m = lines[i].match(/^```(\w+)/);
-    if (m && canonicalLang(m[1]) === cell.language) {
-      const body: string[] = [];
-      i++;
-      while (i < lines.length && !lines[i].startsWith("```")) {
-        body.push(lines[i]);
-        i++;
-      }
-      if (body.join("\n").replace(/\n$/, "") === target) matches.push(i);
-    }
-    i++;
-  }
+  const matches = parseRunBlocks(lines.join("\n"))
+    .filter((block) =>
+      block.language === cell.language
+      && block.source.replace(/\n$/, "") === target
+    )
+    .map((block) => block.lineEnd);
   if (matches.length === 0) return null;
   return matches.reduce((best, cur) =>
     Math.abs(cur - cell.hintLine) < Math.abs(best - cell.hintLine) ? cur : best
@@ -119,7 +107,7 @@ export function findOutputBlock(lines: string[], codeFenceEndLine: number): Outp
 
     const lineStart = i;
     for (let j = i + 1; j < lines.length; j++) {
-      if (NB_OUTPUT_END.test(lines[j])) {
+      if (NB_OUTPUT_END_RE.test(lines[j])) {
         return {
           id: attrs.id,
           hash: attrs.hash,
@@ -215,6 +203,43 @@ export function removeOutputBlock(raw: string, cell: CellLocator): string {
   ].join(eol);
 }
 
+/** Remove every complete nb-output block anchored directly after a supported
+ * executable fence. Marker examples elsewhere in the note are left intact. */
+export function removeAllOutputBlocks(raw: string): string {
+  if (!raw.includes("<!-- nb-output ")) return raw;
+  const { lines, eol } = splitFileLines(raw);
+  const ranges: Array<{ start: number; end: number }> = [];
+  for (const cell of parseRunBlocks(raw)) {
+    const output = findOutputBlock(lines, cell.lineEnd);
+    if (output) ranges.push({ start: output.lineStart, end: output.lineEnd });
+  }
+  if (ranges.length === 0) return raw;
+
+  ranges.sort((a, b) => a.start - b.start);
+  const merged: Array<{ start: number; end: number }> = [];
+  for (const range of ranges) {
+    const previous = merged[merged.length - 1];
+    if (previous && range.start <= previous.end + 1) {
+      previous.end = Math.max(previous.end, range.end);
+    } else {
+      merged.push({ ...range });
+    }
+  }
+
+  const out: string[] = [];
+  let rangeIndex = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const range = merged[rangeIndex];
+    if (range && i === range.start) {
+      i = range.end;
+      rangeIndex++;
+    } else {
+      out.push(lines[i]);
+    }
+  }
+  return out.join(eol);
+}
+
 /**
  * Replace stale `status="running"` blocks with an interrupted-error state.
  * A spinner block survives in the file when Obsidian quits (or the plugin
@@ -233,7 +258,7 @@ export function applyStaleRunningCleanup(
     const attrs = m ? parseAttrs(m[1]) : null;
     if (attrs?.hash && attrs.status === "running" && !isInFlight(attrs.hash)) {
       let j = i + 1;
-      while (j < lines.length && !NB_OUTPUT_END.test(lines[j])) j++;
+      while (j < lines.length && !NB_OUTPUT_END_RE.test(lines[j])) j++;
       if (j < lines.length) {
         out.push(
           makeMarker(attrs.id, attrs.hash, (attrs.format as OutputFormat | undefined) ?? "html", "error"),

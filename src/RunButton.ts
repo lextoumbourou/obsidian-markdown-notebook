@@ -71,6 +71,14 @@ export function isCellInFlight(sourcePath: string, hash: string): boolean {
   return inFlight.has(`${sourcePath}::${hash}`);
 }
 
+export function hasActiveCellRun(sourcePath: string): boolean {
+  const prefix = `${sourcePath}::`;
+  for (const key of activeCellRuns.keys()) {
+    if (key.startsWith(prefix)) return true;
+  }
+  return false;
+}
+
 export interface RunButtonContext {
   app: App;
   getSettings: () => PluginSettings;

@@ -112,6 +112,10 @@ export function getRunAllProgress(sourcePath: string): RunAllProgress | undefine
   return runAllProgress.get(sourcePath)?.state;
 }
 
+export function isRunAllActive(sourcePath: string): boolean {
+  return runAllInFlight.has(sourcePath);
+}
+
 function callHook<K extends keyof RunAllHooks>(
   hooks: RunAllHooks,
   name: K,

@@ -44,6 +44,7 @@ Comment markers are invisible in all standard Markdown renderers — including P
 - **Rich output rendering** — HTML tables, matplotlib plots, plain text, and saved images
 - **Execution count** — `[N]` badge on each run button, Jupyter-style, resets on kernel restart
 - **Run All** — execute every cell in the note in order with a single command
+- **Clear outputs** — remove one cell's persisted output or every output block in the active note
 - **Notebook-scoped kernel state** — variables are shared between cells in one note but isolated from other notes
 - **Predictable relative paths** — every kernel starts in the note's folder, so `data.csv` and other relative paths work naturally
 - **Persistent failure diagnostics** — Python, Node.js, and R exceptions plus non-zero shell exits are marked as failed, with escaped tracebacks, stderr, and preceding output stored in the note
@@ -153,8 +154,12 @@ Each note has its own persistent language kernels. State is shared between cells
 | Command | Description |
 |---|---|
 | Markdown Notebook: Run all cells | Execute every supported code block in the active note, top to bottom |
+| Markdown Notebook: Clear current cell output | Remove the output for the executable cell under the editor cursor |
+| Markdown Notebook: Clear all outputs in active note | Remove every persisted output block from the active note |
 | Markdown Notebook: Restart all kernels | Kill every notebook-scoped language kernel, clearing all variables |
 | Markdown Notebook: Interrupt kernel | Send SIGINT to kernels belonging to the active note |
+
+Clear commands modify only the note's `nb-output` blocks. Saved PNG attachments are retained because another note may reference them. To avoid a completed run immediately recreating cleared output, clearing is refused while an individual cell or Run All is active in that note.
 
 ### Settings
 

@@ -1,7 +1,10 @@
 import { TFile, TFolder } from 'obsidian';
 import {
   findOutputBlock,
+  removeAllOutputBlocks,
   writeOutputBlock,
+  clearOutputBlock,
+  clearAllOutputBlocks,
   clearStaleRunningBlocks,
   imageLink,
   saveImageToVault,
@@ -151,6 +154,102 @@ describe('findOutputBlock', () => {
   });
 });
 
+// ── clear output blocks ──────────────────────────────────────────────────────
+
+describe('clear output blocks', () => {
+  const initial = [
+    '```python', 'x = 1', '```',
+    '<!-- nb-output hash="first" format="html" -->',
+    '<div>one</div>',
+    '<!-- /nb-output -->',
+    '',
+    '```javascript', '2 + 2', '```',
+    '<!-- nb-output hash="second" format="image" -->',
+    '![[second.png]]',
+    '<!-- /nb-output -->',
+  ].join('\n');
+
+  it('clears one cell output and reports whether anything changed', async () => {
+    const mock = makeVaultMock(initial);
+    const file = makeFile('note', '');
+
+    await expect(clearOutputBlock(mock as never, file, {
+      language: 'python', source: 'x = 1', hintLine: 2,
+    })).resolves.toBe(true);
+
+    expect(mock.content).not.toContain('hash="first"');
+    expect(mock.content).toContain('hash="second"');
+    await expect(clearOutputBlock(mock as never, file, {
+      language: 'python', source: 'x = 1', hintLine: 2,
+    })).resolves.toBe(false);
+  });
+
+  it('clears all output blocks while leaving code and attachment files alone', async () => {
+    const mock = makeVaultMock(initial);
+    const file = makeFile('note', '');
+
+    await expect(clearAllOutputBlocks(mock as never, file)).resolves.toBe(true);
+
+    expect(mock.content).not.toContain('<!-- nb-output');
+    expect(mock.content).toContain('x = 1');
+    expect(mock.content).toContain('2 + 2');
+    expect(mock.vault.getAbstractFileByPath).not.toHaveBeenCalled();
+  });
+
+  it('preserves CRLF and leaves unanchored marker examples untouched', () => {
+    const malformed = [
+      '<!-- nb-output hash="broken" format="html" -->',
+      'keep me',
+      '',
+      '```python',
+      'x = 1',
+      '```',
+      '<!-- nb-output hash="valid" format="html" -->',
+      '<div>remove me</div>',
+      '<!-- /nb-output -->',
+      'tail',
+    ].join('\r\n');
+
+    const result = removeAllOutputBlocks(malformed);
+
+    expect(result).toContain('hash="broken"');
+    expect(result).toContain('keep me');
+    expect(result).not.toContain('hash="valid"');
+    expect(result).not.toContain('remove me');
+    expect(result).toContain('\r\n');
+  });
+
+  it('does not remove a complete marker example outside an executable cell', () => {
+    const documented = [
+      '```html',
+      '<!-- nb-output hash="example" format="html" -->',
+      '<div>example only</div>',
+      '<!-- /nb-output -->',
+      '```',
+    ].join('\n');
+
+    expect(removeAllOutputBlocks(documented)).toBe(documented);
+  });
+
+  it('clears later outputs when an earlier output contains a fence-like line', () => {
+    const content = [
+      '```python', 'print("first")', '```',
+      '<!-- nb-output hash="first" format="html" -->',
+      '<pre>x', '```python', 'y</pre>',
+      '<!-- /nb-output -->',
+      '```python', 'print("second")', '```',
+      '<!-- nb-output hash="second" format="html" -->',
+      '<pre>second</pre>',
+      '<!-- /nb-output -->',
+    ].join('\n');
+
+    const result = removeAllOutputBlocks(content);
+    expect(result).not.toContain('<!-- nb-output');
+    expect(result).toContain('print("first")');
+    expect(result).toContain('print("second")');
+  });
+});
+
 // ── writeOutputBlock ──────────────────────────────────────────────────────────
 
 describe('writeOutputBlock', () => {
@@ -262,6 +361,30 @@ describe('writeOutputBlock', () => {
     );
 
     expect(mock.content).toContain('hash="abc"');
+  });
+
+  it('writes to a later cell when earlier output contains a fence-like line', async () => {
+    const initial = [
+      '```python', 'print("first")', '```',
+      '<!-- nb-output hash="first" format="html" -->',
+      '<pre>x', '```python', 'y</pre>',
+      '<!-- /nb-output -->',
+      '```python', 'print("second")', '```',
+    ].join('\n');
+    const mock = makeVaultMock(initial);
+    const file = makeFile('note', '');
+
+    const written = await writeOutputBlock(
+      mock as never, file, pyCell('print("second")', 10),
+      'second', '<div>second</div>', 'html'
+    );
+
+    expect(written).toBe(true);
+    expect(mock.content).toContain('hash="first"');
+    expect(mock.content).toContain('hash="second"');
+    expect(mock.content.indexOf('hash="second"')).toBeGreaterThan(
+      mock.content.indexOf('print("second")')
+    );
   });
 
   it('drops the write when the cell no longer exists in the file', async () => {
