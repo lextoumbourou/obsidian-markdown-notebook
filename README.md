@@ -83,6 +83,8 @@ Click **▶ Run** on any supported language block in reading view. The `[N]` bad
 
 For notebook-wide execution, click **▶ Run all cells** at the top of the reading view. The toolbar reports the cell count and live progress while cells run in document order. While execution is active, the same button becomes **■ Stop** and interrupts the current cell without starting the remaining cells. Individual cell buttons behave the same way. Run all stops after the first error or timeout by default; disable **Stop on first error** in plugin settings to continue through independent cells. The same run action remains available from the command palette as **Markdown Notebook: Run all cells**.
 
+In Live Preview or Source mode, place the cursor inside a supported code cell (or its persisted output) and run **Markdown Notebook: Run cell under cursor** from the command palette. Assign any hotkey to this command in Obsidian's **Hotkeys** settings for a fast edit-run loop without switching views.
+
 Language exceptions and non-zero shell exit codes produce `status="error"` output blocks. The failure marker is stored together with everything emitted before the failure and the escaped traceback or stderr, so diagnostics remain available after reopening the note.
 
 Shell commands such as `grep`, `diff`, and `test` commonly use non-zero exits for expected outcomes. Handle that status in the cell or append `|| true` when it should not fail the cell or stop Run All.
@@ -153,6 +155,7 @@ Each note has its own persistent language kernels. State is shared between cells
 
 | Command | Description |
 |---|---|
+| Markdown Notebook: Run cell under cursor | Execute the cell at the editor cursor and persist its output |
 | Markdown Notebook: Run all cells | Execute every supported code block in the active note, top to bottom |
 | Markdown Notebook: Clear current cell output | Remove the output for the executable cell under the editor cursor |
 | Markdown Notebook: Clear all outputs in active note | Remove every persisted output block from the active note |

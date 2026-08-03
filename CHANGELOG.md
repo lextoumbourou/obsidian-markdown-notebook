@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- **Run cell under cursor** command for executing and persisting the current cell directly from Live Preview or Source mode; the command can be assigned a hotkey in Obsidian
 - Active **Run** and **Run all cells** buttons now become red **Stop** buttons, allowing the current cell or notebook-wide run to be interrupted without executing queued cells
 - Notebook-scoped kernel sessions: persistent Python, Node.js, and R state is shared within a note but isolated between notes, along with execution counts and runtime configuration
 - Kernels now use the note's folder as their working directory, making relative file access predictable; `notebook.cwd` can select a note-relative directory, an absolute path, or the vault root with `/`/`vault`

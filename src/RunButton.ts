@@ -93,6 +93,21 @@ export interface RunArgs {
   [key: string]: string | undefined;
 }
 
+export interface RunnableCell {
+  language: string;
+  source: string;
+  lineEnd: number;
+  id?: string;
+  format?: string;
+}
+
+interface RunCellOptions {
+  hash?: string;
+  button?: HTMLButtonElement;
+  liveEl?: HTMLElement;
+  onExecutionCount?: (count: number) => void;
+}
+
 function parseRunArgs(openingLine: string): RunArgs {
   const match = openingLine.match(/\{([^}]*)\}/);
   const args: RunArgs = {};
@@ -113,6 +128,150 @@ function renderPlainCodeBlock(src: string, el: HTMLElement, language: string): H
   return pre;
 }
 
+/** Execute one cell and persist its output. Shared by Reading View buttons and
+ * the editor command so both paths have identical timeout, error, image, and
+ * cancellation semantics. Returns false when the same cell is already active. */
+export async function runCell(
+  sourcePath: string,
+  file: TFile | null,
+  cell: RunnableCell,
+  context: RunButtonContext,
+  options: RunCellOptions = {},
+): Promise<boolean> {
+  const { app } = context;
+  const settings = context.getSettings();
+  const hash = options.hash ?? await hashCodeFence(cell.language, cell.source);
+  const flightKey = `${sourcePath}::${hash}`;
+  if (activeCellRuns.has(flightKey)) {
+    new Notice("Notebook: this cell is already running.");
+    return false;
+  }
+
+  const controller = new AbortController();
+  const run: ActiveCellRun = {
+    controller,
+    phase: "running",
+    buttons: new Set(options.button ? [options.button] : []),
+  };
+  activeCellRuns.set(flightKey, run);
+  updateCellRunButtons(run);
+  inFlight.add(flightKey);
+
+  let executedKernel: AnyKernel | null = null;
+  const chunks: OutputChunk[] = [];
+  const fm: NotebookFrontmatter = file
+    ? readNotebookFrontmatter(app, file)
+    : {};
+  const timeout = fm.timeout ?? settings.executionTimeout;
+  const pendingFormat = (cell.format ?? fm.format ?? settings.defaultFormat) as OutputFormat;
+  const locator = {
+    language: cell.language,
+    source: cell.source,
+    hintLine: cell.lineEnd,
+  };
+
+  try {
+    if (file) {
+      try {
+        await writeOutputBlock(
+          app, file, locator, hash, RUNNING_HTML, pendingFormat, cell.id, "running",
+        );
+      } catch (err) {
+        console.error("[MarkdownNotebook] Failed to write placeholder block:", err);
+      }
+    }
+
+    let failure: "error" | "timeout" | "cancelled" | null = null;
+    try {
+      executedKernel = context.acquireKernel(cell.language, sourcePath);
+      await executedKernel.execute(cell.source, (chunk) => {
+        chunks.push(chunk);
+        if (options.liveEl) appendChunkToElement(options.liveEl, chunk);
+      }, timeout, controller.signal);
+      run.phase = "finishing";
+      updateCellRunButtons(run);
+    } catch (err) {
+      failure = err instanceof KernelCancelledError
+        ? "cancelled"
+        : err instanceof KernelTimeoutError ? "timeout" : "error";
+      if (failure === "cancelled") {
+        new Notice("Notebook: execution stopped.");
+      } else {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (!(err instanceof KernelExecutionError) && !(err instanceof KernelTimeoutError)) {
+          const chunk = { type: "error" as const, text: msg };
+          chunks.push(chunk);
+          if (options.liveEl) appendChunkToElement(options.liveEl, chunk);
+        }
+        new Notice(`Notebook: ${msg}`);
+      }
+    }
+
+    if (file) {
+      if (failure) {
+        const statusHtml = failure === "cancelled"
+          ? INTERRUPTED_HTML
+          : failure === "timeout" ? timeoutHtml(timeout) : ERROR_HTML;
+        const failureHtml = renderFailureToHtml(statusHtml, chunks);
+        try {
+          await writeOutputBlock(
+            app, file, locator, hash, failureHtml, "html", cell.id,
+            failure === "cancelled" ? "error" : failure,
+          );
+        } catch (err) {
+          console.error("[MarkdownNotebook] Failed to write error block:", err);
+        }
+      } else {
+        try {
+          const { content, format } = await buildOutput(
+            app, file, hash, chunks, cell, settings, fm,
+            () => {
+              if (controller.signal.aborted) throw new KernelCancelledError();
+            },
+          );
+          await writeOutputBlock(
+            app, file, locator, hash, content, format, cell.id, undefined,
+            () => {
+              if (controller.signal.aborted) throw new KernelCancelledError();
+            },
+          );
+        } catch (err) {
+          if (err instanceof KernelCancelledError) {
+            try {
+              await writeOutputBlock(
+                app, file, locator, hash, INTERRUPTED_HTML, pendingFormat,
+                cell.id, "error",
+              );
+            } catch {
+              // file write is failing entirely; nothing more we can do
+            }
+            new Notice("Notebook: execution stopped.");
+          } else {
+            console.error("[MarkdownNotebook] Failed to write output block:", err);
+            try {
+              await writeOutputBlock(
+                app, file, locator, hash, ERROR_HTML, pendingFormat, cell.id, "error",
+              );
+            } catch {
+              // file write is failing entirely; nothing more we can do
+            }
+          }
+        }
+      }
+    }
+    return true;
+  } finally {
+    options.liveEl?.remove();
+    inFlight.delete(flightKey);
+    if (activeCellRuns.get(flightKey) === run) activeCellRuns.delete(flightKey);
+    resetCellRunButtons(run);
+    options.onExecutionCount?.(
+      executedKernel?.executionCount
+      ?? context.peekExecutionCount(cell.language, sourcePath),
+    );
+  }
+}
+
 /**
  * Registered via plugin.registerMarkdownCodeBlockProcessor(language, ...).
  * All blocks for supported languages get a run button — no {run} marker needed.
@@ -128,7 +287,6 @@ export async function processCodeBlock(
   const { app } = context;
 
   const pre = renderPlainCodeBlock(src, el, language);
-  const settings = context.getSettings();
   const hash = await hashCodeFence(language, src);
   const flightKey = `${ctx.sourcePath}::${hash}`;
 
@@ -157,148 +315,41 @@ export async function processCodeBlock(
       }
       return;
     }
-    const controller = new AbortController();
-    const run: ActiveCellRun = {
-      controller,
-      phase: "running",
-      buttons: new Set([button]),
-    };
-    activeCellRuns.set(flightKey, run);
-    updateCellRunButtons(run);
-
-    inFlight.add(flightKey);
-    let executedKernel: AnyKernel | null = null;
-    try {
-      // Re-read section info at click time so args are never stale.
-      // getSectionInfo can return null during the initial render pass.
-      const sectionInfo = ctx.getSectionInfo(el);
-      let runArgs: RunArgs = {};
-      if (sectionInfo) {
-        const lines = sectionInfo.text.split("\n");
-        for (let i = sectionInfo.lineStart; i <= sectionInfo.lineEnd; i++) {
-          const line = lines[i] ?? "";
-          if (line.startsWith("```")) {
-            runArgs = parseRunArgs(line);
-            break;
-          }
+    // Re-read section info at click time so args are never stale.
+    const sectionInfo = ctx.getSectionInfo(el);
+    let runArgs: RunArgs = {};
+    if (sectionInfo) {
+      const lines = sectionInfo.text.split("\n");
+      for (let i = sectionInfo.lineStart; i <= sectionInfo.lineEnd; i++) {
+        const line = lines[i] ?? "";
+        if (line.startsWith("```")) {
+          runArgs = parseRunArgs(line);
+          break;
         }
       }
-
-      const liveEl = el.createDiv({ cls: "nb-live-output" });
-      const chunks: OutputChunk[] = [];
-
-      const file = app.vault.getAbstractFileByPath(ctx.sourcePath);
-      const fm: NotebookFrontmatter = file instanceof TFile
-        ? readNotebookFrontmatter(app, file)
-        : {};
-      const timeout = fm.timeout ?? settings.executionTimeout;
-      const pendingFormat = (runArgs.format ?? fm.format ?? settings.defaultFormat) as OutputFormat;
-
-      // Identify the cell by content, not position — line numbers go stale as
-      // soon as any other cell's write inserts lines above this one.
-      const cell = { language, source: src, hintLine: sectionInfo?.lineEnd ?? 0 };
-
-      // Write a placeholder block immediately so the output anchor exists in the
-      // file while execution is running. Prevents accidental edits into the gap.
-      if (sectionInfo && file instanceof TFile) {
-        try {
-          await writeOutputBlock(app, file, cell, hash, RUNNING_HTML, pendingFormat, runArgs.id, "running");
-        } catch (err) {
-          console.error("[MarkdownNotebook] Failed to write placeholder block:", err);
-        }
-      }
-
-      let failure: "error" | "timeout" | "cancelled" | null = null;
-      try {
-        // Acquire only for actual execution. Rendering and badge updates use a
-        // non-creating lookup and can never replace a live session.
-        executedKernel = context.acquireKernel(language, ctx.sourcePath);
-        await executedKernel.execute(src, (chunk) => {
-          chunks.push(chunk);
-          appendChunkToElement(liveEl, chunk);
-        }, timeout, controller.signal);
-        run.phase = "finishing";
-        updateCellRunButtons(run);
-      } catch (err) {
-        failure = err instanceof KernelCancelledError
-          ? "cancelled"
-          : err instanceof KernelTimeoutError ? "timeout" : "error";
-        if (failure === "cancelled") {
-          new Notice("Notebook: execution stopped.");
-        } else {
-          const msg = err instanceof Error ? err.message : String(err);
-          if (!(err instanceof KernelExecutionError) && !(err instanceof KernelTimeoutError)) {
-            const chunk = { type: "error" as const, text: msg };
-            chunks.push(chunk);
-            appendChunkToElement(liveEl, chunk);
-          }
-          new Notice(`Notebook: ${msg}`);
-        }
-      }
-
-      if (sectionInfo && file instanceof TFile) {
-        if (failure) {
-          const statusHtml = failure === "cancelled"
-            ? INTERRUPTED_HTML
-            : failure === "timeout" ? timeoutHtml(timeout) : ERROR_HTML;
-          const failureHtml = renderFailureToHtml(statusHtml, chunks);
-          try {
-            await writeOutputBlock(
-              app, file, cell, hash, failureHtml, "html", runArgs.id,
-              failure === "cancelled" ? "error" : failure,
-            );
-          } catch (err) {
-            console.error("[MarkdownNotebook] Failed to write error block:", err);
-          }
-        } else {
-          try {
-            const { content, format } = await buildOutput(
-              app, file, hash, chunks, runArgs, settings, fm,
-              () => {
-                if (controller.signal.aborted) throw new KernelCancelledError();
-              },
-            );
-            await writeOutputBlock(
-              app, file, cell, hash, content, format, runArgs.id, undefined,
-              () => {
-                if (controller.signal.aborted) throw new KernelCancelledError();
-              },
-            );
-          } catch (err) {
-            if (err instanceof KernelCancelledError) {
-              try {
-                await writeOutputBlock(
-                  app, file, cell, hash, INTERRUPTED_HTML, pendingFormat,
-                  runArgs.id, "error",
-                );
-              } catch {
-                // file write is failing entirely; nothing more we can do
-              }
-              new Notice("Notebook: execution stopped.");
-            } else {
-              console.error("[MarkdownNotebook] Failed to write output block:", err);
-              // Never leave the "running" placeholder behind — degrade to an
-              // error block so the file doesn't show a spinner forever.
-              try {
-                await writeOutputBlock(app, file, cell, hash, ERROR_HTML, pendingFormat, runArgs.id, "error");
-              } catch {
-                // file write is failing entirely; nothing more we can do
-              }
-            }
-          }
-        }
-      }
-
-      liveEl.remove();
-    } finally {
-      inFlight.delete(flightKey);
-      if (activeCellRuns.get(flightKey) === run) activeCellRuns.delete(flightKey);
-      resetCellRunButtons(run);
-      countBadge.textContent = `[${
-        executedKernel?.executionCount
-        ?? context.peekExecutionCount(language, ctx.sourcePath)
-      }]`;
     }
+
+    const liveEl = el.createDiv({ cls: "nb-live-output" });
+    const candidate = app.vault.getAbstractFileByPath(ctx.sourcePath);
+    const started = await runCell(
+      ctx.sourcePath,
+      candidate instanceof TFile ? candidate : null,
+      {
+        id: runArgs.id,
+        format: runArgs.format,
+        language,
+        source: src,
+        lineEnd: sectionInfo?.lineEnd ?? 0,
+      },
+      context,
+      {
+        hash,
+        button,
+        liveEl,
+        onExecutionCount: (count) => { countBadge.textContent = `[${count}]`; },
+      },
+    );
+    if (!started) liveEl.remove();
   });
 }
 
@@ -307,7 +358,7 @@ async function buildOutput(
   file: TFile,
   hash: string,
   chunks: OutputChunk[],
-  runArgs: RunArgs,
+  runArgs: Pick<RunArgs, "id" | "format">,
   settings: PluginSettings,
   fm: NotebookFrontmatter,
   assertActive: () => void,

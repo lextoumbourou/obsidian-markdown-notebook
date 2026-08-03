@@ -8,6 +8,7 @@ import { RKernel } from "./kernels/RKernel";
 import { BaseKernel } from "./kernels/BaseKernel";
 import {
   processCodeBlock,
+  runCell,
   RunButtonContext,
   hasActiveCellRun,
   isCellInFlight,
@@ -164,6 +165,19 @@ export default class MarkdownNotebookPlugin extends Plugin {
     });
 
     this.addCommand({
+      id: "run-cell-under-cursor",
+      name: "Run cell under cursor",
+      editorCheckCallback: (checking, editor, ctx) => {
+        const file = ctx.file;
+        if (!(file instanceof TFile)) return false;
+        const block = findRunBlockAtLine(editor.getValue(), editor.getCursor().line);
+        if (!block) return false;
+        if (!checking) void this.runEditorCell(file, block, context);
+        return true;
+      },
+    });
+
+    this.addCommand({
       id: "clear-cell-output",
       name: "Clear current cell output",
       editorCheckCallback: (checking, editor, ctx) => {
@@ -266,6 +280,24 @@ export default class MarkdownNotebookPlugin extends Plugin {
       return false;
     }
     return true;
+  }
+
+  private async runEditorCell(
+    file: TFile,
+    block: RunBlock,
+    context: RunButtonContext,
+  ): Promise<void> {
+    if (isRunAllActive(file.path)) {
+      new Notice("Notebook: this file is already running.");
+      return;
+    }
+    try {
+      await runCell(file.path, file, block, context);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("[MarkdownNotebook] Failed to run editor cell:", err);
+      new Notice(`Notebook: cell could not be run: ${msg}`);
+    }
   }
 
   private async clearCellOutput(file: TFile, block: RunBlock): Promise<void> {

@@ -13,8 +13,66 @@ describe('MarkdownNotebookPlugin', () => {
     expect(plugin.registerMarkdownPostProcessor).toHaveBeenCalledWith(expect.any(Function));
     const commandCalls = (plugin.addCommand as jest.Mock).mock.calls as Array<[Command]>;
     expect(commandCalls.map(([command]) => command.id)).toEqual(
-      expect.arrayContaining(['clear-cell-output', 'clear-all-outputs']),
+      expect.arrayContaining([
+        'run-cell-under-cursor', 'clear-cell-output', 'clear-all-outputs',
+      ]),
     );
+  });
+
+  it('runs the editor cell under the cursor and persists its output', async () => {
+    const plugin = new MarkdownNotebookPlugin({} as never, {} as never);
+    await plugin.onload();
+    const file = new TFile();
+    file.path = 'Notebook.md';
+    Object.assign(file, { extension: 'md', parent: { path: '' } });
+    let markdown = [
+      '# Notebook', '',
+      '```python {id=editor-cell}',
+      'print("from editor")',
+      '```',
+      '', 'after',
+    ].join('\n');
+    (plugin.app.vault.process as jest.Mock).mockImplementation(
+      async (_file: TFile, transform: (raw: string) => string) => {
+        markdown = transform(markdown);
+      },
+    );
+    const kernel = {
+      executionCount: 0,
+      execute: jest.fn(async (_source: string, onChunk: (chunk: unknown) => void) => {
+        kernel.executionCount += 1;
+        onChunk({ type: 'stream', stream: 'stdout', text: 'from editor\n' });
+      }),
+    };
+    jest.spyOn(plugin, 'acquireKernel').mockReturnValue(kernel as never);
+
+    const commandCalls = (plugin.addCommand as jest.Mock).mock.calls as Array<[Command]>;
+    const command = commandCalls.find(
+      ([candidate]) => candidate.id === 'run-cell-under-cursor',
+    )![0];
+    const editor = {
+      getValue: () => markdown,
+      getCursor: () => ({ line: 3, ch: 4 }),
+    };
+
+    expect(command.editorCheckCallback!(true, editor as never, { file } as never)).toBe(true);
+    expect(command.editorCheckCallback!(false, editor as never, { file } as never)).toBe(true);
+    for (let i = 0; i < 10 && kernel.execute.mock.calls.length === 0; i++) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+
+    expect(kernel.execute).toHaveBeenCalledWith(
+      'print("from editor")', expect.any(Function), 30000, expect.any(AbortSignal),
+    );
+    expect(markdown).toContain('id="editor-cell"');
+    expect(markdown).toContain('<pre class="nb-stream-stdout">from editor\n</pre>');
+    expect(markdown).not.toContain('status="running"');
+
+    const outsideEditor = {
+      getValue: () => markdown,
+      getCursor: () => ({ line: 0, ch: 0 }),
+    };
+    expect(command.editorCheckCallback!(true, outsideEditor as never, { file } as never)).toBe(false);
   });
 
   it('clears the cursor cell output and then all remaining outputs', async () => {
