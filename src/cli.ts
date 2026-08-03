@@ -25,6 +25,7 @@ import { applyOutputBlock, OutputFormat, OutputStatus, ERROR_HTML, timeoutHtml }
 import { KernelExecutionError, KernelTimeoutError } from "./kernels/BaseKernel";
 import { hashCodeFence } from "./HashUtils";
 import { renderChunksToHtml, renderFailureToHtml, extractImageData, OutputChunk } from "./output/MimeRenderer";
+import { DEFAULT_OUTPUT_LIMIT_KB, OutputLimiter } from "./output/OutputLimiter";
 import { SubprocessKernel } from "./kernels/SubprocessKernel";
 import { NodeKernel } from "./kernels/NodeKernel";
 import { ShellKernel } from "./kernels/ShellKernel";
@@ -47,6 +48,7 @@ export interface CliOptions {
   only: boolean;
   write: boolean;
   timeout?: number;
+  outputLimit?: number;
   media?: string;
   vaultRoot?: string;
   paths: { python: string; node: string; shell: string; r: string };
@@ -65,6 +67,8 @@ Options:
                      (default: print output to stdout only)
   --timeout <ms>     Per-cell timeout (default: frontmatter notebook.timeout
                      or 30000)
+  --output-limit <kb> Maximum rendered output stored per cell (default:
+                     frontmatter notebook.outputLimit or 100)
   --media <dir>      Folder for format=image PNGs, relative to the note
                      (default: frontmatter notebook.media or next to the note)
   --vault-root <dir> Vault root for notebook.cwd: / or notebook.cwd: vault
@@ -115,6 +119,12 @@ export function parseArgs(argv: string[]): CliOptions | { error: string } | { he
         opts.timeout = n;
         break;
       }
+      case "--output-limit": {
+        const n = parseInt(next() ?? "", 10);
+        if (isNaN(n) || n <= 0) return { error: "--output-limit requires a positive number" };
+        opts.outputLimit = n;
+        break;
+      }
       case "--media": {
         const v = next();
         if (v === null) return { error: "--media requires a value" };
@@ -149,6 +159,7 @@ export interface NotebookFm {
   format?: "html" | "image";
   media?: string;
   timeout?: number;
+  outputLimit?: number;
   markdownLinks?: boolean;
   cwd?: string;
   python?: string;
@@ -181,6 +192,7 @@ export function parseNotebookFrontmatter(content: string): NotebookFm {
     if (key === "format" && (val === "html" || val === "image")) fm.format = val;
     else if (key === "media") fm.media = val;
     else if (key === "timeout" && !isNaN(Number(val))) fm.timeout = Number(val);
+    else if (key === "outputLimit" && Number(val) > 0) fm.outputLimit = Number(val);
     else if (key === "markdownLinks") fm.markdownLinks = val === "true";
     else if (key === "cwd") fm.cwd = val;
     else if (key === "python" || key === "node" || key === "shell" || key === "r") fm[key] = val;
@@ -254,7 +266,7 @@ function createKernel(lang: string, paths: CliOptions["paths"], cwd: string): An
   }
 }
 
-function printChunk(chunk: OutputChunk, willWrite: boolean): void {
+export function printChunk(chunk: OutputChunk, willWrite: boolean): void {
   switch (chunk.type) {
     case "stream":
       process.stdout.write(chunk.text);
@@ -270,6 +282,9 @@ function printChunk(chunk: OutputChunk, willWrite: boolean): void {
       process.stderr.write(`[${chunk.mime} output, ${size}${hint}]\n`);
       break;
     }
+    case "truncated":
+      process.stderr.write(`[Output truncated after ${chunk.limitBytes / 1024} KB]\n`);
+      break;
   }
 }
 
@@ -278,13 +293,14 @@ function buildCellOutput(
   block: RunBlock,
   hash: string,
   chunks: OutputChunk[],
+  nativeImageData: string | null,
   opts: CliOptions,
   fm: NotebookFm
 ): { content: string; format: OutputFormat } {
   const format = block.format ?? fm.format ?? "html";
   if (format === "image") {
     // Native image data only — the plugin's HTML-to-PNG fallback needs a DOM
-    const img = extractImageData(chunks);
+    const img = nativeImageData ?? extractImageData(chunks);
     if (img) {
       const noteDir = path.dirname(filePath);
       const mediaRel = (opts.media ?? fm.media ?? "").trim().replace(/\/+$/, "");
@@ -354,6 +370,7 @@ async function main(): Promise<void> {
 
   const fm = parseNotebookFrontmatter(content);
   const timeout = opts.timeout ?? fm.timeout ?? 30000;
+  const outputLimit = opts.outputLimit ?? fm.outputLimit ?? DEFAULT_OUTPUT_LIMIT_KB;
   const noteDirectory = path.dirname(filePath);
   let cwd: string;
   try {
@@ -387,20 +404,32 @@ async function main(): Promise<void> {
   };
 
   let failed = false;
-  const results: Array<{ block: RunBlock; chunks: OutputChunk[]; failure: OutputStatus | null }> = [];
+  const results: Array<{
+    block: RunBlock;
+    chunks: OutputChunk[];
+    nativeImageData: string | null;
+    failure: OutputStatus | null;
+  }> = [];
   for (const index of selection) {
     const block = blocks[index];
     process.stderr.write(
       `── cell ${index + 1}/${blocks.length} [${block.language}]${block.id ? ` id=${block.id}` : ""}\n`
     );
-    const chunks: OutputChunk[] = [];
+    const format = block.format ?? fm.format ?? "html";
+    const output = new OutputLimiter(outputLimit, format === "image");
+    const chunks = output.chunks;
     let failure: OutputStatus | null = null;
     try {
       await getKernel(block.language).execute(
         block.source,
         (chunk) => {
-          chunks.push(chunk);
+          const accepted = output.add(chunk);
           printChunk(chunk, opts.write);
+          if (opts.write) {
+            for (const item of accepted) {
+              if (item.type === "truncated") printChunk(item, true);
+            }
+          }
         },
         timeout
       );
@@ -410,17 +439,22 @@ async function main(): Promise<void> {
       const msg = err instanceof Error ? err.message : String(err);
       if (!(err instanceof KernelExecutionError) && !(err instanceof KernelTimeoutError)) {
         const chunk = { type: "error" as const, text: msg };
-        chunks.push(chunk);
+        const accepted = output.add(chunk);
         printChunk(chunk, opts.write);
+        if (opts.write) {
+          for (const item of accepted) {
+            if (item.type === "truncated") printChunk(item, true);
+          }
+        }
       }
     }
-    results.push({ block, chunks, failure });
+    results.push({ block, chunks, nativeImageData: output.nativeImageData, failure });
   }
   for (const k of kernels.values()) k.stop();
 
   if (opts.write) {
     let updated = content;
-    for (const { block, chunks, failure } of results) {
+    for (const { block, chunks, nativeImageData, failure } of results) {
       const hash = await hashCodeFence(block.language, block.source);
       // Failed cells get the same status blocks the plugin writes
       const { content: outContent, format, status } = failure
@@ -432,7 +466,12 @@ async function main(): Promise<void> {
             format: "html" as OutputFormat,
             status: failure,
           }
-        : { ...buildCellOutput(filePath, block, hash, chunks, opts, fm), status: undefined };
+        : {
+            ...buildCellOutput(
+              filePath, block, hash, chunks, nativeImageData, opts, fm,
+            ),
+            status: undefined,
+          };
       updated = applyOutputBlock(
         updated,
         { language: block.language, source: block.source, hintLine: block.lineEnd },

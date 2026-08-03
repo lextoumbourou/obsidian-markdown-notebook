@@ -128,15 +128,16 @@ describe('Run button', () => {
     };
     const kernel = {
       executionCount: 1,
-      async execute(_code: string, onChunk: (chunk: { type: 'error'; text: string }) => void) {
+      async execute(_code: string, onChunk: (chunk: unknown) => void) {
         const detail = 'Traceback\nValueError: value < 3\n';
+        onChunk({ type: 'stream', stream: 'stdout', text: 'noise\n'.repeat(1000) });
         onChunk({ type: 'error', text: detail });
         throw new KernelExecutionError('ValueError: value < 3', detail);
       },
     };
     const context = {
       app,
-      getSettings: () => DEFAULT_SETTINGS,
+      getSettings: () => ({ ...DEFAULT_SETTINGS, outputLimitKb: 1 }),
       acquireKernel: () => kernel,
       peekExecutionCount: () => kernel.executionCount,
     };
@@ -152,8 +153,52 @@ describe('Run button', () => {
 
     expect(markdown).toContain('status="error"');
     expect(markdown).toContain('Execution failed');
+    expect(markdown).toContain('Output truncated after 1 KB');
     expect(markdown).toContain('ValueError: value &lt; 3');
     expect(markdown).not.toContain('ValueError: value < 3\n</pre>');
+  });
+
+  it('caps persisted output from an individual cell', async () => {
+    const source = 'print("lots")';
+    let markdown = `\`\`\`python\n${source}\n\`\`\``;
+    const file = new TFile();
+    file.path = 'note.md';
+    Object.assign(file, { extension: 'md', parent: { path: '' } });
+    const app = {
+      metadataCache: { getFileCache: jest.fn(() => null) },
+      workspace: { getLeavesOfType: jest.fn(() => []) },
+      vault: {
+        getAbstractFileByPath: jest.fn(() => file),
+        process: jest.fn(async (_file: TFile, transform: (raw: string) => string) => {
+          markdown = transform(markdown);
+        }),
+      },
+    };
+    const kernel = {
+      executionCount: 1,
+      async execute(_code: string, onChunk: (chunk: unknown) => void) {
+        onChunk({ type: 'stream', stream: 'stdout', text: '<'.repeat(5000) });
+      },
+    };
+    const context = {
+      app,
+      getSettings: () => ({ ...DEFAULT_SETTINGS, outputLimitKb: 1 }),
+      acquireKernel: () => kernel,
+      peekExecutionCount: () => kernel.executionCount,
+    };
+    const ctx = {
+      sourcePath: file.path,
+      getSectionInfo: () => ({ text: markdown, lineStart: 0, lineEnd: 2 }),
+    } as unknown as MarkdownPostProcessorContext;
+    Object.assign(globalThis, { window: {}, HTMLPreElement: FakeElement });
+    const root = new FakeElement();
+
+    await processCodeBlock(source, root as unknown as HTMLElement, ctx, context as never, 'python');
+    await root.querySelector('.nb-run-button')!.click();
+
+    expect(markdown).toContain('Output truncated after 1 KB');
+    expect(markdown).toContain('&lt;');
+    expect(new TextEncoder().encode(markdown).byteLength).toBeLessThan(1300);
   });
 
   it('keeps Stop available after a re-render and writes an interrupted state', async () => {

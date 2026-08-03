@@ -1,6 +1,6 @@
 import MarkdownNotebookPlugin from '../src/main';
 import { TFile, type Command } from 'obsidian';
-import { cancelRunAll, runAll } from '../src/RunAll';
+import { cancelRunAll, isRunAllActive, runAll } from '../src/RunAll';
 import { KernelCancelledError } from '../src/kernels/BaseKernel';
 
 describe('MarkdownNotebookPlugin', () => {
@@ -14,7 +14,8 @@ describe('MarkdownNotebookPlugin', () => {
     const commandCalls = (plugin.addCommand as jest.Mock).mock.calls as Array<[Command]>;
     expect(commandCalls.map(([command]) => command.id)).toEqual(
       expect.arrayContaining([
-        'run-cell-under-cursor', 'clear-cell-output', 'clear-all-outputs',
+        'run-cell-under-cursor', 'run-all-cells-above-cursor',
+        'run-cell-and-all-below-cursor', 'clear-cell-output', 'clear-all-outputs',
       ]),
     );
   });
@@ -125,6 +126,59 @@ describe('MarkdownNotebookPlugin', () => {
     expect(markdown).toContain('status="error"');
     expect(markdown).toContain('Execution was interrupted');
     expect(markdown).not.toContain('status="running"');
+  });
+
+  it('runs cells above or at-and-below the editor cursor', async () => {
+    const plugin = new MarkdownNotebookPlugin({} as never, {} as never);
+    await plugin.onload();
+    const file = new TFile();
+    file.path = 'Notebook.md';
+    Object.assign(file, { extension: 'md', parent: { path: '' } });
+    let markdown = [
+      '```python', 'first', '```', '',
+      '```python', 'second', '```', '',
+      '```python', 'third', '```',
+    ].join('\n');
+    (plugin.app.vault.read as jest.Mock).mockImplementation(async () => markdown);
+    (plugin.app.vault.process as jest.Mock).mockImplementation(
+      async (_file: TFile, transform: (raw: string) => string) => {
+        markdown = transform(markdown);
+      },
+    );
+    const executed: string[] = [];
+    const kernel = {
+      executionCount: 0,
+      async execute(source: string) {
+        executed.push(source);
+        kernel.executionCount += 1;
+      },
+    };
+    jest.spyOn(plugin, 'acquireKernel').mockReturnValue(kernel as never);
+    const commands = new Map<string, Command>(
+      (plugin.addCommand as jest.Mock).mock.calls
+        .map(([command]: [Command]) => [command.id, command]),
+    );
+    const editor = {
+      getValue: () => markdown,
+      getCursor: () => ({
+        line: markdown.split('\n').findIndex((line) => line === 'second'), ch: 0,
+      }),
+    };
+
+    expect(commands.get('run-all-cells-above-cursor')!
+      .editorCheckCallback!(false, editor as never, { file } as never)).toBe(true);
+    for (let i = 0; i < 20 && isRunAllActive(file.path); i++) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    expect(executed).toEqual(['first']);
+
+    executed.length = 0;
+    expect(commands.get('run-cell-and-all-below-cursor')!
+      .editorCheckCallback!(false, editor as never, { file } as never)).toBe(true);
+    for (let i = 0; i < 20 && isRunAllActive(file.path); i++) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    expect(executed).toEqual(['second', 'third']);
   });
 
   it('clears the cursor cell output and then all remaining outputs', async () => {

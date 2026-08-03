@@ -22,6 +22,7 @@ import {
   OutputChunk,
 } from "./output/MimeRenderer";
 import { renderHtmlToPng } from "./output/HtmlToImage";
+import { OutputLimiter } from "./output/OutputLimiter";
 import { KernelCancelledError, KernelExecutionError, KernelTimeoutError } from "./kernels/BaseKernel";
 import type { BaseKernel } from "./kernels/BaseKernel";
 import type { ShellKernel } from "./kernels/ShellKernel";
@@ -158,12 +159,16 @@ export async function runCell(
   inFlight.add(flightKey);
 
   let executedKernel: AnyKernel | null = null;
-  const chunks: OutputChunk[] = [];
   const fm: NotebookFrontmatter = file
     ? readNotebookFrontmatter(app, file)
     : {};
   const timeout = fm.timeout ?? settings.executionTimeout;
   const pendingFormat = (cell.format ?? fm.format ?? settings.defaultFormat) as OutputFormat;
+  const output = new OutputLimiter(
+    fm.outputLimit ?? settings.outputLimitKb,
+    pendingFormat === "image",
+  );
+  const chunks = output.chunks;
   const locator = {
     language: cell.language,
     source: cell.source,
@@ -185,8 +190,9 @@ export async function runCell(
     try {
       executedKernel = context.acquireKernel(cell.language, sourcePath);
       await executedKernel.execute(cell.source, (chunk) => {
-        chunks.push(chunk);
-        if (options.liveEl) appendChunkToElement(options.liveEl, chunk);
+        for (const accepted of output.add(chunk)) {
+          if (options.liveEl) appendChunkToElement(options.liveEl, accepted);
+        }
       }, timeout, controller.signal);
       run.phase = "finishing";
       updateCellRunButtons(run);
@@ -200,8 +206,9 @@ export async function runCell(
         const msg = err instanceof Error ? err.message : String(err);
         if (!(err instanceof KernelExecutionError) && !(err instanceof KernelTimeoutError)) {
           const chunk = { type: "error" as const, text: msg };
-          chunks.push(chunk);
-          if (options.liveEl) appendChunkToElement(options.liveEl, chunk);
+          for (const accepted of output.add(chunk)) {
+            if (options.liveEl) appendChunkToElement(options.liveEl, accepted);
+          }
         }
         new Notice(`Notebook: ${msg}`);
       }
@@ -224,7 +231,7 @@ export async function runCell(
       } else {
         try {
           const { content, format } = await buildOutput(
-            app, file, hash, chunks, cell, settings, fm,
+            app, file, hash, chunks, output.nativeImageData, cell, settings, fm,
             () => {
               if (controller.signal.aborted) throw new KernelCancelledError();
             },
@@ -381,6 +388,7 @@ async function buildOutput(
   file: TFile,
   hash: string,
   chunks: OutputChunk[],
+  nativeImageData: string | null,
   runArgs: Pick<RunArgs, "id" | "format">,
   settings: PluginSettings,
   fm: NotebookFrontmatter,
@@ -393,7 +401,7 @@ async function buildOutput(
 
   if (outputFormat === "image") {
     // Prefer native image data (matplotlib, R plots, etc.)
-    const imgData = extractImageData(chunks) ??
+    const imgData = nativeImageData ?? extractImageData(chunks) ??
       await renderHtmlToPng(renderChunksToHtml(chunks));
     assertActive();
     if (imgData) {

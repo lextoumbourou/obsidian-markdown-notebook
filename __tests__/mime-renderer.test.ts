@@ -64,6 +64,12 @@ describe('renderChunksToHtml', () => {
     expect(html).toContain('nb-stream-stdout');
     expect(html).toContain('nb-stream-stderr');
   });
+
+  it('renders the output truncation marker', () => {
+    const html = renderChunksToHtml([{ type: 'truncated', limitBytes: 102400 }]);
+    expect(html).toContain('class="nb-output-truncated"');
+    expect(html).toContain('Output truncated after 100 KB');
+  });
 });
 
 describe('renderFailureToHtml', () => {

@@ -178,6 +178,32 @@ export default class MarkdownNotebookPlugin extends Plugin {
     });
 
     this.addCommand({
+      id: "run-all-cells-above-cursor",
+      name: "Run all cells above cursor",
+      editorCheckCallback: (checking, editor, ctx) => {
+        const file = ctx.file;
+        if (!(file instanceof TFile)) return false;
+        const block = findRunBlockAtLine(editor.getValue(), editor.getCursor().line);
+        if (!block) return false;
+        if (!checking) this.runRelativeCells(file, block, "above");
+        return true;
+      },
+    });
+
+    this.addCommand({
+      id: "run-cell-and-all-below-cursor",
+      name: "Run cell and all cells below cursor",
+      editorCheckCallback: (checking, editor, ctx) => {
+        const file = ctx.file;
+        if (!(file instanceof TFile)) return false;
+        const block = findRunBlockAtLine(editor.getValue(), editor.getCursor().line);
+        if (!block) return false;
+        if (!checking) this.runRelativeCells(file, block, "below");
+        return true;
+      },
+    });
+
+    this.addCommand({
       id: "clear-cell-output",
       name: "Clear current cell output",
       editorCheckCallback: (checking, editor, ctx) => {
@@ -298,6 +324,21 @@ export default class MarkdownNotebookPlugin extends Plugin {
       console.error("[MarkdownNotebook] Failed to run editor cell:", err);
       new Notice(`Notebook: cell could not be run: ${msg}`);
     }
+  }
+
+  private runRelativeCells(
+    file: TFile,
+    block: RunBlock,
+    mode: "above" | "below",
+  ): void {
+    void runAll(
+      this.app,
+      file,
+      (lang) => this.acquireKernel(lang, file.path),
+      this.settings,
+      runAllToolbarHooks(file.path, true),
+      { mode, target: block },
+    );
   }
 
   private async clearCellOutput(file: TFile, block: RunBlock): Promise<void> {

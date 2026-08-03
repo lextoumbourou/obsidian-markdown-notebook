@@ -3,9 +3,22 @@ import {
   parseNotebookFrontmatter,
   selectCells,
   findVaultRoot,
+  printChunk,
   resolveCliWorkingDirectory,
   CliOptions,
 } from '../src/cli';
+
+describe('CLI output reporting', () => {
+  it('reports persisted-output truncation to stderr', () => {
+    const write = jest.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      printChunk({ type: 'truncated', limitBytes: 102400 }, true);
+      expect(write).toHaveBeenCalledWith('[Output truncated after 100 KB]\n');
+    } finally {
+      write.mockRestore();
+    }
+  });
+});
 
 describe('parseArgs', () => {
   const ok = (argv: string[]): CliOptions => {
@@ -23,11 +36,15 @@ describe('parseArgs', () => {
   });
 
   it('parses selectors and flags', () => {
-    const opts = ok(['Note.md', '--cell', '3', '--only', '--write', '--timeout', '5000']);
+    const opts = ok([
+      'Note.md', '--cell', '3', '--only', '--write', '--timeout', '5000',
+      '--output-limit', '64',
+    ]);
     expect(opts.cell).toBe(3);
     expect(opts.only).toBe(true);
     expect(opts.write).toBe(true);
     expect(opts.timeout).toBe(5000);
+    expect(opts.outputLimit).toBe(64);
   });
 
   it('parses interpreter path overrides', () => {
@@ -102,6 +119,7 @@ describe('parseNotebookFrontmatter', () => {
       '  format: image',
       '  media: attachments',
       '  timeout: 60000',
+      '  outputLimit: 256',
       '  markdownLinks: true',
       '  cwd: data',
       '  python: .venv/bin/python',
@@ -112,6 +130,7 @@ describe('parseNotebookFrontmatter', () => {
       format: 'image',
       media: 'attachments',
       timeout: 60000,
+      outputLimit: 256,
       markdownLinks: true,
       cwd: 'data',
       python: '.venv/bin/python',

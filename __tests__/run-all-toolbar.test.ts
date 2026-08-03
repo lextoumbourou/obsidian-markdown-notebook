@@ -335,4 +335,27 @@ describe('Run All toolbar', () => {
     runAllToolbarHooks(file.path).onCancel?.({ current: 0, total: 1 });
     expect(firstPreview.querySelector('.nb-run-all-button')?.textContent).toBe('▶ Run all cells');
   });
+
+  it('restores the full note count after a cursor-relative range run', async () => {
+    const { context, ctx, file } = fixture(notebook(
+      'one', 'two', 'three', 'four', 'five',
+    ));
+    const host = new FakeElement('markdown-preview-sizer');
+    const section = host.createDiv({ cls: 'markdown-preview-section' });
+    await renderRunAllToolbar(section as unknown as HTMLElement, ctx, context as never);
+
+    const hooks = runAllToolbarHooks(file.path, true);
+    hooks.onStart?.({ total: 2 });
+    hooks.onProgress?.({ current: 1, total: 2 });
+    expect(host.querySelector('.nb-run-all-status')?.textContent).toBe('Running 1 / 2');
+    expect(host.querySelector('.nb-run-all-toolbar')?.dataset.cellCount).toBe('5');
+
+    hooks.onComplete?.({ total: 2, succeeded: 2, failed: 0, skipped: false });
+    expect(host.querySelector('.nb-run-all-status')?.textContent).toBe('5 cells');
+    expect(host.querySelector('.nb-run-all-toolbar')?.dataset.cellCount).toBe('5');
+
+    hooks.onProgress?.({ current: 1, total: 3 });
+    hooks.onCancel?.({ current: 1, total: 3 });
+    expect(host.querySelector('.nb-run-all-status')?.textContent).toBe('5 cells');
+  });
 });

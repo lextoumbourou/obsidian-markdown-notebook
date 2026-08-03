@@ -21,6 +21,7 @@ import {
   OutputChunk,
 } from "./output/MimeRenderer";
 import { renderHtmlToPng } from "./output/HtmlToImage";
+import { OutputLimiter } from "./output/OutputLimiter";
 import type { BaseKernel } from "./kernels/BaseKernel";
 import type { ShellKernel } from "./kernels/ShellKernel";
 import type { PluginSettings } from "./settings/Settings";
@@ -46,6 +47,36 @@ export interface RunAllHooks {
   onProgress?: (state: { current: number; total: number }) => void;
   onComplete?: (summary: RunAllSummary) => void;
   onCancel?: (state: { current: number; total: number }) => void;
+}
+
+export interface RunAllRange {
+  mode: "above" | "below";
+  target: Pick<RunBlock, "language" | "source" | "lineEnd">;
+}
+
+/** Select cells relative to a content-anchored target. Null means the target
+ * was edited or deleted before the run started. */
+export function selectRunRange(
+  blocks: RunBlock[],
+  range?: RunAllRange,
+): RunBlock[] | null {
+  if (!range) return blocks;
+  const candidates = blocks
+    .map((block, index) => ({ block, index }))
+    .filter(({ block }) =>
+      block.language === range.target.language
+      && block.source === range.target.source
+    );
+  if (candidates.length === 0) return null;
+  const targetIndex = candidates.reduce((best, candidate) =>
+    Math.abs(candidate.block.lineEnd - range.target.lineEnd)
+      < Math.abs(best.block.lineEnd - range.target.lineEnd)
+      ? candidate
+      : best
+  ).index;
+  return range.mode === "above"
+    ? blocks.slice(0, targetIndex)
+    : blocks.slice(targetIndex);
 }
 
 interface OwnedProgress {
@@ -134,7 +165,8 @@ export async function runAll(
   file: TFile,
   getKernel: (lang: string) => AnyKernel,
   settings: PluginSettings,
-  hooks: RunAllHooks = {}
+  hooks: RunAllHooks = {},
+  range?: RunAllRange,
 ): Promise<RunAllSummary> {
   const sourcePath = file.path;
   const activeOwner = runAllFilesInFlight.get(file) ?? runAllInFlight.get(sourcePath);
@@ -204,12 +236,21 @@ export async function runAll(
     throwIfRunCancelled(generation);
     const content = await app.vault.read(file);
     throwIfRunCancelled(generation);
-    const blocks = parseRunBlocks(content);
+    const allBlocks = parseRunBlocks(content);
+    const blocks = selectRunRange(allBlocks, range);
     const fm = readNotebookFrontmatter(app, file);
+    if (blocks === null) {
+      new Notice("Notebook: the selected cell changed before the run started.");
+      const missingSummary = { total: 0, succeeded: 0, failed: 0, skipped: true };
+      callHook(hooks, "onComplete", missingSummary);
+      return missingSummary;
+    }
     total = blocks.length;
 
     if (total === 0) {
-      new Notice("No executable cells found.");
+      new Notice(range?.mode === "above"
+        ? "No executable cells above the cursor."
+        : "No executable cells found.");
       const emptySummary = { total: 0, succeeded: 0, failed: 0, skipped: false };
       callHook(hooks, "onComplete", emptySummary);
       return emptySummary;
@@ -258,14 +299,19 @@ export async function runAll(
         new Notice(`Notebook: cell ${current} could not be prepared: ${msg}`);
         continue;
       }
-      const chunks: OutputChunk[] = [];
       const timeout = fm.timeout ?? settings.executionTimeout;
+      const outputFormat = block.format ?? fm.format ?? settings.defaultFormat;
+      const output = new OutputLimiter(
+        fm.outputLimit ?? settings.outputLimitKb,
+        outputFormat === "image",
+      );
+      const chunks = output.chunks;
 
       let failure: OutputStatus | null = null;
       try {
         await kernels.get(block.language)!.execute(
           block.source,
-          (chunk) => chunks.push(chunk),
+          (chunk) => { output.add(chunk); },
           timeout,
           controller.signal,
         );
@@ -280,7 +326,7 @@ export async function runAll(
         failedCells.add(i);
         const msg = err instanceof Error ? err.message : String(err);
         if (!(err instanceof KernelExecutionError) && !(err instanceof KernelTimeoutError)) {
-          chunks.push({ type: "error", text: msg });
+          output.add({ type: "error", text: msg });
         }
         new Notice(`Notebook: cell ${current}: ${msg}`);
       }
@@ -319,7 +365,8 @@ export async function runAll(
           continue;
         }
         const { content: outContent, format } = await resolveOutput(
-          app, file, hash, chunks, block.id, block.format, settings, fm,
+          app, file, hash, chunks, output.nativeImageData,
+          block.id, block.format, settings, fm,
           () => throwIfRunCancelled(generation)
         );
         throwIfRunCancelled(generation);
@@ -439,6 +486,7 @@ async function resolveOutput(
   file: TFile,
   hash: string,
   chunks: OutputChunk[],
+  nativeImageData: string | null,
   id: string | undefined,
   formatArg: string | undefined,
   settings: PluginSettings,
@@ -452,7 +500,7 @@ async function resolveOutput(
 
   if (outputFormat === "image") {
     // Prefer native image data (matplotlib, R plots, etc.)
-    let imgData = extractImageData(chunks);
+    let imgData = nativeImageData ?? extractImageData(chunks);
     if (!imgData) {
       assertActive();
       imgData = await renderHtmlToPng(renderChunksToHtml(chunks));

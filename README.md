@@ -48,6 +48,7 @@ Comment markers are invisible in all standard Markdown renderers — including P
 - **Notebook-scoped kernel state** — variables are shared between cells in one note but isolated from other notes
 - **Predictable relative paths** — every kernel starts in the note's folder, so `data.csv` and other relative paths work naturally
 - **Persistent failure diagnostics** — Python, Node.js, and R exceptions plus non-zero shell exits are marked as failed, with escaped tracebacks, stderr, and preceding output stored in the note
+- **Output size protection** — persisted output is capped at 100 KB per cell by default, with a visible truncation marker instead of an oversized note
 - **Robust failure handling** — distinct ⏱ timeout state, runaway cells are interrupted on timeout, and output blocks left mid-run by a crash are repaired on next open
 - **Headless runner** — the `nb-run` CLI executes cells and updates outputs without Obsidian (publish pipelines, CI)
 - **Export-friendly** — outputs render correctly in Pelican, PDF, and any HTML-aware renderer
@@ -84,6 +85,8 @@ Click **▶ Run** on any supported language block in reading view. The `[N]` bad
 For notebook-wide execution, click **▶ Run all cells** at the top of the reading view. The toolbar reports the cell count and live progress while cells run in document order. While execution is active, the same button becomes **■ Stop** and interrupts the current cell without starting the remaining cells. Individual cell buttons behave the same way. Run all stops after the first error or timeout by default; disable **Stop on first error** in plugin settings to continue through independent cells. The same run action remains available from the command palette as **Markdown Notebook: Run all cells**.
 
 In Live Preview or Source mode, place the cursor inside a supported code cell (or its persisted output) and run **Markdown Notebook: Run cell under cursor** from the command palette. Assign any hotkey to this command in Obsidian's **Hotkeys** settings for a fast edit-run loop without switching views. Press the command again while that cell is running to stop it.
+
+The editor commands **Run all cells above cursor** and **Run cell and all cells below cursor** rebuild only the required portion of shared kernel state. “Above” excludes the cursor cell; “below” includes it. Both use the same progress, error-handling, and persisted-output behavior as Run All.
 
 Language exceptions and non-zero shell exit codes produce `status="error"` output blocks. The failure marker is stored together with everything emitted before the failure and the escaped traceback or stderr, so diagnostics remain available after reopening the note.
 
@@ -135,6 +138,7 @@ notebook:
   format: image       # default output format (html | image)
   media: attachments  # image save folder, relative to vault root
   timeout: 60000      # execution timeout in ms
+  outputLimit: 250    # maximum persisted output per cell in KB
   markdownLinks: true # use ![](path) instead of ![[file]] for images
   cwd: /              # optional: use vault root instead of the note folder
   python: .venv/bin/python # optional per-note Python executable
@@ -144,6 +148,10 @@ notebook:
 Cell-level args override frontmatter, which overrides plugin settings:
 
 > plugin settings → frontmatter → cell args
+
+`outputLimit` overrides the global maximum output size for that note, in KB. The limit is measured against rendered UTF-8 output, so escaped HTML cannot expand far beyond it; excess output is discarded after a visible truncation marker. Space is reclaimed from ordinary output for a final traceback, which is independently truncated from the beginning if necessary so the exception itself remains visible.
+
+Native PNGs produced by a successful `format=image` cell are saved as attachments and only their small link is stored in the note, so the attachment data is not counted against this Markdown limit. If that cell fails or times out after producing a plot, the failure block retains capped text diagnostics but does not embed the plot.
 
 By default, Python, Node.js, Bash, and R execute with the note's folder as their working directory. Set `cwd: /` (or `cwd: vault`) to use the vault root. Any other relative `cwd` is resolved from the note's folder; absolute filesystem paths are also supported.
 
@@ -156,6 +164,8 @@ Each note has its own persistent language kernels. State is shared between cells
 | Command | Description |
 |---|---|
 | Markdown Notebook: Run cell under cursor | Execute the cell at the editor cursor, or stop it if already running |
+| Markdown Notebook: Run all cells above cursor | Execute every cell before the editor cursor |
+| Markdown Notebook: Run cell and all cells below cursor | Execute the cursor cell and every cell after it |
 | Markdown Notebook: Run all cells | Execute every supported code block in the active note, top to bottom |
 | Markdown Notebook: Clear current cell output | Remove the output for the executable cell under the editor cursor |
 | Markdown Notebook: Clear all outputs in active note | Remove every persisted output block from the active note |
@@ -171,6 +181,7 @@ Clear commands modify only the note's `nb-output` blocks. Saved PNG attachments 
 | Show Run all toolbar | on | Show notebook-wide execution controls at the top of Reading View |
 | Stop on first error | on | Stop Run all after the first failed or timed-out cell |
 | Execution timeout | `30000` | Maximum execution time per cell (ms) |
+| Maximum output size | `100` | Maximum rendered output stored per cell (KB) |
 | Python path | `python3` | Path to the Python executable |
 | Node.js path | `node` | Path to the Node.js executable |
 | Shell path | `bash` | Path to the shell interpreter |
@@ -257,12 +268,13 @@ node cli.js Note.md --cell 3            # run cells 1..3 (shared kernel state)
 node cli.js Note.md --cell 3 --only     # run just cell 3 (fresh kernel)
 node cli.js Note.md --id revenue-chart  # run up to the cell with this id
 node cli.js Note.md --write             # run all cells, update output blocks in place
+node cli.js Note.md --output-limit 250  # cap persisted cell output at 250 KB
 node cli.js Note.md --vault-root Vault  # explicit root for notebook.cwd: /
 ```
 
-Because each invocation starts fresh kernels, targeting a cell runs every cell *up to and including* it by default (Jupyter's "run up to here"), so earlier cells' variables are available; `--only` skips the prelude. Interpreter paths default to `python3`/`node`/`bash`/`R` and can be overridden with `--python`, `--node`, `--shell`, `--r`. Frontmatter `notebook:` defaults, including `cwd` and per-language executable paths, are respected.
+Because each invocation starts fresh kernels, targeting a cell runs every cell *up to and including* it by default (Jupyter's "run up to here"), so earlier cells' variables are available; `--only` skips the prelude. Interpreter paths default to `python3`/`node`/`bash`/`R` and can be overridden with `--python`, `--node`, `--shell`, `--r`. Frontmatter `notebook:` defaults, including `cwd`, `outputLimit`, and per-language executable paths, are respected.
 
-The CLI uses the same `cwd` rules as the plugin. For `cwd: /` or `cwd: vault`, it searches upward from the note for the nearest `.obsidian` directory. If the note is outside a vault copy, pass `--vault-root <dir>`; the CLI fails clearly rather than interpreting `/` as the filesystem root. Relative frontmatter executable paths resolve from the note, while relative command-line executable paths resolve from the shell's current directory.
+The CLI uses the same `cwd` rules as the plugin. For `cwd: /` or `cwd: vault`, it searches upward from the note for the nearest `.obsidian` directory. If the note is outside a vault copy, pass `--vault-root <dir>`; the CLI fails clearly rather than interpreting `/` as the filesystem root. Relative frontmatter executable paths resolve from the note, while relative command-line executable paths resolve from the shell's current directory. The output limit applies to blocks written with `--write`; live terminal output continues streaming in full.
 
 Two differences from the plugin remain: `format=image` only saves native images (matplotlib/R PNGs) — the browser HTML-to-PNG fallback needs a DOM and degrades to `format=html`; and the media folder is resolved relative to the note's directory.
 

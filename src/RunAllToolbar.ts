@@ -61,17 +61,25 @@ function updateToolbar(toolbar: HTMLElement, state: RunAllProgress): void {
   if (!button || !status) return;
 
   const total = state.total ?? Number(toolbar.dataset.cellCount ?? 0);
-  toolbar.dataset.cellCount = String(total);
   if (state.running) {
     button.disabled = false;
     button.dataset.running = "true";
     button.textContent = "■ Stop";
     status.textContent = `Running ${state.current} / ${total}`;
   } else {
+    toolbar.dataset.cellCount = String(total);
     button.disabled = false;
     delete button.dataset.running;
     button.textContent = "▶ Run all cells";
     status.textContent = cellCountLabel(total);
+  }
+}
+
+function restoreRunAllToolbarCount(sourcePath: string): void {
+  for (const toolbar of toolbarElements) {
+    if (toolbar.dataset.sourcePath !== sourcePath) continue;
+    const total = Number(toolbar.dataset.cellCount ?? 0);
+    updateToolbar(toolbar, { running: false, current: total, total });
   }
 }
 
@@ -81,16 +89,21 @@ export function setRunAllToolbarState(sourcePath: string, state: RunAllProgress)
   }
 }
 
-export function runAllToolbarHooks(sourcePath: string): RunAllHooks {
+export function runAllToolbarHooks(
+  sourcePath: string,
+  restoreFullCount = false,
+): RunAllHooks {
   return {
     onStart: ({ total }) =>
       setRunAllToolbarState(sourcePath, { running: true, current: 0, total }),
     onProgress: ({ current, total }) =>
       setRunAllToolbarState(sourcePath, { running: true, current, total }),
-    onComplete: ({ total }) =>
-      setRunAllToolbarState(sourcePath, { running: false, current: total, total }),
-    onCancel: ({ current, total }) =>
-      setRunAllToolbarState(sourcePath, { running: false, current, total }),
+    onComplete: ({ total }) => restoreFullCount
+      ? restoreRunAllToolbarCount(sourcePath)
+      : setRunAllToolbarState(sourcePath, { running: false, current: total, total }),
+    onCancel: ({ current, total }) => restoreFullCount
+      ? restoreRunAllToolbarCount(sourcePath)
+      : setRunAllToolbarState(sourcePath, { running: false, current, total }),
   };
 }
 

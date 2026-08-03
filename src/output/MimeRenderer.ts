@@ -1,14 +1,15 @@
 export type OutputChunk =
   | { type: "stream"; stream: "stdout" | "stderr"; text: string }
   | { type: "rich"; mime: string; data: string }
-  | { type: "error"; text: string };
+  | { type: "error"; text: string }
+  | { type: "truncated"; limitBytes: number };
 
 /**
  * Convert a list of OutputChunks into a single HTML string for storage.
  */
 export function renderChunksToHtml(chunks: OutputChunk[]): string {
   if (chunks.length === 0) return "";
-  const parts = chunks.map(renderChunk);
+  const parts = chunks.map(renderChunkToHtml);
   return `<div class="nb-output">\n${parts.join("\n")}\n</div>`;
 }
 
@@ -19,7 +20,7 @@ export function renderFailureToHtml(statusHtml: string, chunks: OutputChunk[]): 
   return output ? `${statusHtml}\n${output}` : statusHtml;
 }
 
-function renderChunk(chunk: OutputChunk): string {
+export function renderChunkToHtml(chunk: OutputChunk): string {
   switch (chunk.type) {
     case "stream":
       return chunk.stream === "stderr"
@@ -29,6 +30,8 @@ function renderChunk(chunk: OutputChunk): string {
       return `<pre class="nb-stream-stderr">${escapeHtml(chunk.text)}</pre>`;
     case "rich":
       return renderRich(chunk.mime, chunk.data);
+    case "truncated":
+      return `<div class="nb-output-truncated">Output truncated after ${formatBytes(chunk.limitBytes)}</div>`;
   }
 }
 
@@ -91,7 +94,17 @@ export function appendChunkToElement(el: HTMLElement, chunk: OutputChunk): void 
       wrapper.innerHTML = renderRich(chunk.mime, chunk.data);
       break;
     }
+    case "truncated":
+      el.createDiv({
+        cls: "nb-output-truncated",
+        text: `Output truncated after ${formatBytes(chunk.limitBytes)}`,
+      });
+      break;
   }
+}
+
+function formatBytes(bytes: number): string {
+  return bytes % 1024 === 0 ? `${bytes / 1024} KB` : `${bytes} bytes`;
 }
 
 function collapseStyleTags(html: string): string {

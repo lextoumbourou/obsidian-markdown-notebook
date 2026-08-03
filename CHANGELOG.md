@@ -3,6 +3,8 @@
 ## [Unreleased]
 
 ### Added
+- **Run all cells above cursor** and **Run cell and all cells below cursor** editor commands for rebuilding or continuing shared notebook state without running the entire note
+- Configurable per-cell output-size cap, defaulting to 100 KB, with a visible truncation marker; `notebook.outputLimit` and the CLI's `--output-limit` override the limit in KB
 - **Run cell under cursor** command for executing and persisting the current cell directly from Live Preview or Source mode; the command can be assigned a hotkey in Obsidian
 - Active **Run** and **Run all cells** buttons now become red **Stop** buttons, allowing the current cell or notebook-wide run to be interrupted without executing queued cells
 - Notebook-scoped kernel sessions: persistent Python, Node.js, and R state is shared within a note but isolated between notes, along with execution counts and runtime configuration
@@ -19,6 +21,9 @@
 - Relative executable paths in global plugin settings resolve from the vault root; relative frontmatter executable paths remain note-relative
 
 ### Fixed
+- Cursor-relative range runs restore the Reading View toolbar's full-note cell count after completion or cancellation instead of leaving the subset count behind
+- Tracebacks emitted after the output cap is reached now reclaim space from ordinary output and retain their diagnostic tail within the same configured limit
+- Oversized Markdown rich output is dropped atomically instead of being truncated inside raw HTML, and `nb-run --write` now reports persisted-output truncation on stderr
 - Persisted output containing a line that looks like an executable code fence no longer creates phantom cells or hides later cells from Run All, toolbar counts, output writes, or Clear All
 - **Clear current cell output** is now available when the editor cursor is inside the cell's attached output block, not only inside its code fence
 - `nb-run` now gives `notebook.cwd: /` and `notebook.cwd: vault` the same vault-root meaning as the plugin, discovering the nearest `.obsidian` directory or requiring `--vault-root` instead of silently running from the filesystem root or a nonexistent `vault` subfolder

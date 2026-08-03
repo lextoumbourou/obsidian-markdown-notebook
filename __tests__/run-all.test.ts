@@ -5,6 +5,7 @@ import {
   disposeRunAll,
   parseRunBlocks,
   runAll,
+  selectRunRange,
 } from '../src/RunAll';
 import { DEFAULT_SETTINGS } from '../src/settings/Settings';
 import { KernelTimeoutError } from '../src/kernels/BaseKernel';
@@ -216,6 +217,24 @@ describe('parseRunBlocks', () => {
       'print("second")',
     ]);
   });
+
+  it('selects cells above or at-and-below a content-anchored target', () => {
+    const blocks = parseRunBlocks(notebook('first', 'second', 'third'));
+
+    expect(selectRunRange(blocks, { mode: 'above', target: blocks[1] }))
+      .toEqual([blocks[0]]);
+    expect(selectRunRange(blocks, { mode: 'below', target: blocks[1] }))
+      .toEqual([blocks[1], blocks[2]]);
+    expect(selectRunRange(blocks, {
+      mode: 'below', target: { language: 'python', source: 'missing', lineEnd: 0 },
+    })).toBeNull();
+  });
+
+  it('uses the nearest line hint to select between identical cells', () => {
+    const blocks = parseRunBlocks(notebook('same', 'middle', 'same'));
+    expect(selectRunRange(blocks, { mode: 'above', target: blocks[2] }))
+      .toEqual([blocks[0], blocks[1]]);
+  });
 });
 
 describe('runAll', () => {
@@ -311,6 +330,25 @@ describe('runAll', () => {
 
     expect(memory.content()).toContain('status="timeout"');
     expect(memory.content().match(/Execution timed out/g)).toHaveLength(1);
+  });
+
+  it('caps persisted output and records that it was truncated', async () => {
+    const memory = memoryNotebook(notebook('print("lots")'));
+    const kernel = {
+      executionCount: 0,
+      async execute(_source: string, onChunk: (chunk: unknown) => void) {
+        onChunk({ type: 'stream', stream: 'stdout', text: '<'.repeat(5000) });
+      },
+    };
+
+    await runAllWithHooks(
+      memory.app, memory.file, () => kernel,
+      { ...DEFAULT_SETTINGS, outputLimitKb: 1 },
+    );
+
+    expect(memory.content()).toContain('Output truncated after 1 KB');
+    expect(memory.content()).toContain('&lt;');
+    expect(new TextEncoder().encode(memory.content()).byteLength).toBeLessThan(1300);
   });
 
   it('skips an overlapping run for the same file', async () => {

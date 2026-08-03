@@ -76,6 +76,22 @@ export class SettingsTab extends PluginSettingTab {
     containerEl.createEl("h3", { text: "Output" });
 
     new Setting(containerEl)
+      .setName("Maximum output size (KB)")
+      .setDesc("Maximum rendered output stored per cell; excess output is replaced by a truncation marker")
+      .addText((text) =>
+        text
+          .setPlaceholder("100")
+          .setValue(String(this.plugin.settings.outputLimitKb))
+          .onChange(async (value) => {
+            const n = parseInt(value, 10);
+            if (!isNaN(n) && n > 0) {
+              this.plugin.settings.outputLimitKb = n;
+              await this.plugin.saveSettings();
+            }
+          })
+      );
+
+    new Setting(containerEl)
       .setName("Default output format")
       .setDesc("Format used when no format= arg is specified on a cell")
       .addDropdown((drop) =>

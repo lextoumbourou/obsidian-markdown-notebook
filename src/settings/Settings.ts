@@ -1,9 +1,12 @@
+import { DEFAULT_OUTPUT_LIMIT_KB } from "../output/OutputLimiter";
+
 export interface PluginSettings {
   pythonPath: string;
   nodePath: string;
   shellPath: string;
   rPath: string;
   executionTimeout: number;
+  outputLimitKb: number;
   stopOnFirstError: boolean;
   showRunAllToolbar: boolean;
   defaultFormat: "html" | "image";
@@ -17,6 +20,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   shellPath: "bash",
   rPath: "R",
   executionTimeout: 30000,
+  outputLimitKb: DEFAULT_OUTPUT_LIMIT_KB,
   stopOnFirstError: true,
   showRunAllToolbar: true,
   defaultFormat: "html",
