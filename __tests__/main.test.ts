@@ -75,6 +75,58 @@ describe('MarkdownNotebookPlugin', () => {
     expect(command.editorCheckCallback!(true, outsideEditor as never, { file } as never)).toBe(false);
   });
 
+  it('stops the editor cell when the run command is invoked again', async () => {
+    const plugin = new MarkdownNotebookPlugin({} as never, {} as never);
+    await plugin.onload();
+    const file = new TFile();
+    file.path = 'Notebook.md';
+    Object.assign(file, { extension: 'md', parent: { path: '' } });
+    let markdown = '```python\nwhile True: pass\n```';
+    (plugin.app.vault.process as jest.Mock).mockImplementation(
+      async (_file: TFile, transform: (raw: string) => string) => {
+        markdown = transform(markdown);
+      },
+    );
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => { markStarted = resolve; });
+    const kernel = {
+      executionCount: 0,
+      execute: jest.fn(
+        (_source: string, _onChunk: unknown, _timeout: number, signal?: AbortSignal) => {
+          markStarted();
+          return new Promise<void>((_resolve, reject) => {
+            signal?.addEventListener(
+              'abort', () => reject(new KernelCancelledError()), { once: true },
+            );
+          });
+        },
+      ),
+    };
+    jest.spyOn(plugin, 'acquireKernel').mockReturnValue(kernel as never);
+    const commandCalls = (plugin.addCommand as jest.Mock).mock.calls as Array<[Command]>;
+    const command = commandCalls.find(
+      ([candidate]) => candidate.id === 'run-cell-under-cursor',
+    )![0];
+    const editor = {
+      getValue: () => markdown,
+      getCursor: () => ({ line: 1, ch: 0 }),
+    };
+
+    expect(command.editorCheckCallback!(false, editor as never, { file } as never)).toBe(true);
+    await started;
+    expect(markdown).toContain('status="running"');
+
+    expect(command.editorCheckCallback!(false, editor as never, { file } as never)).toBe(true);
+    for (let i = 0; i < 10 && markdown.includes('status="running"'); i++) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+
+    expect(kernel.execute).toHaveBeenCalledTimes(1);
+    expect(markdown).toContain('status="error"');
+    expect(markdown).toContain('Execution was interrupted');
+    expect(markdown).not.toContain('status="running"');
+  });
+
   it('clears the cursor cell output and then all remaining outputs', async () => {
     const plugin = new MarkdownNotebookPlugin({} as never, {} as never);
     await plugin.onload();

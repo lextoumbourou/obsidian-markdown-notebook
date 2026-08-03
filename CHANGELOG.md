@@ -12,6 +12,7 @@
 - **Clear current cell output** and **Clear all outputs in active note** commands; clearing removes persisted `nb-output` blocks while retaining image attachments and is blocked during active execution
 
 ### Changed
+- **Run cell under cursor** now acts as a Run/Stop toggle, so pressing its hotkey again interrupts the active cell and persists the interrupted state
 - **Interrupt kernel** now targets kernels belonging to the active note; **Restart all kernels** and plugin unload clean up every notebook-scoped session
 - The `nb-run` CLI now starts kernels in the note's folder and respects the new working-directory and executable frontmatter fields
 - Notebook sessions are shut down when their last Markdown leaf closes and when their note is renamed or deleted, bounding the number of persistent subprocesses

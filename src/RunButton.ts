@@ -272,6 +272,29 @@ export async function runCell(
   }
 }
 
+/** Run an idle cell, or stop it when the same cell is already executing. */
+export async function runOrStopCell(
+  sourcePath: string,
+  file: TFile,
+  cell: RunnableCell,
+  context: RunButtonContext,
+): Promise<"started" | "stopped" | "finishing"> {
+  const hash = await hashCodeFence(cell.language, cell.source);
+  const activeRun = activeCellRuns.get(`${sourcePath}::${hash}`);
+  if (activeRun) {
+    if (activeRun.phase === "running") {
+      activeRun.phase = "stopping";
+      activeRun.controller.abort();
+      updateCellRunButtons(activeRun);
+      return "stopped";
+    }
+    return "finishing";
+  }
+
+  await runCell(sourcePath, file, cell, context, { hash });
+  return "started";
+}
+
 /**
  * Registered via plugin.registerMarkdownCodeBlockProcessor(language, ...).
  * All blocks for supported languages get a run button — no {run} marker needed.

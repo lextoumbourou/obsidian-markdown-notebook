@@ -8,7 +8,7 @@ import { RKernel } from "./kernels/RKernel";
 import { BaseKernel } from "./kernels/BaseKernel";
 import {
   processCodeBlock,
-  runCell,
+  runOrStopCell,
   RunButtonContext,
   hasActiveCellRun,
   isCellInFlight,
@@ -292,7 +292,7 @@ export default class MarkdownNotebookPlugin extends Plugin {
       return;
     }
     try {
-      await runCell(file.path, file, block, context);
+      await runOrStopCell(file.path, file, block, context);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error("[MarkdownNotebook] Failed to run editor cell:", err);
