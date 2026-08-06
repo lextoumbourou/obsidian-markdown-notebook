@@ -410,6 +410,21 @@ describe('runAll', () => {
     expect(new TextEncoder().encode(memory.content()).byteLength).toBeLessThan(1300);
   });
 
+  it('persists a code output format as fenced Markdown', async () => {
+    const memory = memoryNotebook('```python {format=json}\nprint("json")\n```');
+    const kernel = {
+      executionCount: 0,
+      async execute(_source: string, onChunk: (chunk: unknown) => void) {
+        onChunk({ type: 'stream', stream: 'stdout', text: '{"ok": true}\n' });
+      },
+    };
+
+    await runAllWithHooks(memory.app, memory.file, () => kernel, DEFAULT_SETTINGS);
+
+    expect(memory.content()).toContain('```json\n{"ok": true}\n```');
+    expect(memory.content()).toContain('format="json"');
+  });
+
   it('skips an overlapping run for the same file', async () => {
     const memory = memoryNotebook(notebook('print("held")'));
     let releaseFirst!: () => void;

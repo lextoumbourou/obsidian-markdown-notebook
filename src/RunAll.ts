@@ -18,6 +18,7 @@ import {
   renderChunksToHtml,
   renderFailureToHtml,
   extractImageData,
+  normaliseOutputFormat,
   OutputChunk,
 } from "./output/MimeRenderer";
 import { renderHtmlToPng } from "./output/HtmlToImage";
@@ -303,7 +304,9 @@ export async function runAll(
         continue;
       }
       const timeout = fm.timeout ?? settings.executionTimeout;
-      const outputFormat = block.format ?? fm.format ?? settings.defaultFormat;
+      const outputFormat = normaliseOutputFormat(
+        block.format ?? fm.format ?? settings.defaultFormat,
+      );
       const output = new OutputLimiter(
         fm.outputLimit ?? settings.outputLimitKb,
         outputFormat === "image",
@@ -520,7 +523,9 @@ async function resolveOutput(
   assertActive: () => void,
 ): Promise<{ content: string; format: OutputFormat }> {
   assertActive();
-  const outputFormat = formatArg ?? fm.format ?? settings.defaultFormat;
+  const outputFormat = normaliseOutputFormat(
+    formatArg ?? fm.format ?? settings.defaultFormat,
+  );
   const mediaPath = fm.media ?? settings.mediaPath;
   const markdownLinks = fm.markdownLinks ?? settings.markdownImageLinks;
 
@@ -541,5 +546,5 @@ async function resolveOutput(
     }
   }
   assertActive();
-  return { content: renderChunksToHtml(chunks), format: "html" };
+  return { content: renderChunksToHtml(chunks, outputFormat), format: outputFormat };
 }

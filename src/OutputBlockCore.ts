@@ -6,7 +6,7 @@ import { NB_OUTPUT_END_RE, NB_OUTPUT_RE, parseRunBlocks } from "./CellParser";
  * OutputBlock.ts.
  */
 
-export type OutputFormat = "html" | "image";
+export type OutputFormat = string;
 export type OutputStatus = "running" | "error" | "timeout";
 
 /**

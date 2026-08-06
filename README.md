@@ -113,12 +113,13 @@ Shell commands such as `grep`, `diff`, and `test` commonly use non-zero exits fo
 
 ### Output formats
 
-Two formats are supported, controlled with the `format` argument:
+The `format` argument controls how output is stored:
 
 | Argument | Stored as | Best for |
 |---|---|---|
 | `format=html` | HTML in comment block | DataFrames, rich objects, text (default) |
 | `format=image` | PNG saved to vault, `![[...]]` link | Plots, any output you want as an image |
+| `format=json` | Syntax-highlighted Markdown code fence | JSON text |
 
 Example:
 
@@ -133,6 +134,19 @@ plt.show()
 If `format=image` is set but the code produces no native image (e.g. a DataFrame instead of a plot), the output is rendered to PNG automatically using the browser's layout engine.
 
 The default format is `html` and can be changed in plugin settings or per-note via frontmatter.
+
+To store plain text output as a syntax-highlighted Markdown code block, use its
+fence language as the format:
+
+````markdown
+```python {format=json}
+import json
+print(json.dumps({"status": "ok"}, indent=2))
+```
+````
+
+The plugin labels the output with that language. It does not convert the output
+or validate that it contains valid JSON.
 
 ### Cell IDs
 
@@ -222,7 +236,7 @@ Outputs are stored between HTML comment markers:
 | Attribute | Description |
 |---|---|
 | `hash` | SHA-256 digest (8 bytes) of the cell's language + source |
-| `format` | `html` or `image`. Absent means `html`. |
+| `format` | `html`, `image`, or the language of a fenced text output such as `json`. Absent means `html`. |
 | `id` | Cell identifier, if set. Used in image filenames. |
 | `status` | `running`, `error`, or `timeout` for in-progress/failed cells. Absent for successful output. |
 

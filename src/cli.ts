@@ -24,7 +24,13 @@ import { parseRunBlocks, RunBlock } from "./CellParser";
 import { applyOutputBlock, OutputFormat, OutputStatus, ERROR_HTML, timeoutHtml } from "./OutputBlockCore";
 import { KernelExecutionError, KernelTimeoutError } from "./kernels/BaseKernel";
 import { hashCodeFence } from "./HashUtils";
-import { renderChunksToHtml, renderFailureToHtml, extractImageData, OutputChunk } from "./output/MimeRenderer";
+import {
+  renderChunksToHtml,
+  renderFailureToHtml,
+  extractImageData,
+  normaliseOutputFormat,
+  OutputChunk,
+} from "./output/MimeRenderer";
 import { DEFAULT_OUTPUT_LIMIT_KB, OutputLimiter } from "./output/OutputLimiter";
 import { SubprocessKernel } from "./kernels/SubprocessKernel";
 import { NodeKernel } from "./kernels/NodeKernel";
@@ -298,7 +304,7 @@ function buildCellOutput(
   opts: CliOptions,
   fm: NotebookFm
 ): { content: string; format: OutputFormat } {
-  const format = block.format ?? fm.format ?? "html";
+  const format = normaliseOutputFormat(block.format ?? fm.format ?? "html");
   if (format === "image") {
     // Native image data only — the plugin's HTML-to-PNG fallback needs a DOM
     const img = nativeImageData ?? extractImageData(chunks);
@@ -315,7 +321,7 @@ function buildCellOutput(
       return { content: link, format: "image" };
     }
   }
-  return { content: renderChunksToHtml(chunks), format: "html" };
+  return { content: renderChunksToHtml(chunks, format), format };
 }
 
 async function main(): Promise<void> {
@@ -426,7 +432,7 @@ async function main(): Promise<void> {
     process.stderr.write(
       `── cell ${index + 1}/${blocks.length} [${block.language}]${block.id ? ` id=${block.id}` : ""}\n`
     );
-    const format = block.format ?? fm.format ?? "html";
+    const format = normaliseOutputFormat(block.format ?? fm.format ?? "html");
     const output = new OutputLimiter(outputLimit, format === "image");
     const chunks = output.chunks;
     let failure: OutputStatus | null = null;

@@ -7,9 +7,11 @@ export type OutputChunk =
 /**
  * Convert a list of OutputChunks into a single HTML string for storage.
  */
-export function renderChunksToHtml(chunks: OutputChunk[]): string {
+export function renderChunksToHtml(chunks: OutputChunk[], format = "html"): string {
   if (chunks.length === 0) return "";
-  const parts = chunks.map(renderChunkToHtml);
+  const outputFormat = normaliseOutputFormat(format);
+  const parts = chunks.map((chunk) => renderChunkToHtml(chunk, outputFormat));
+  if (outputFormat !== "html" && outputFormat !== "image") return parts.join("\n\n");
   return `<div class="nb-output">\n${parts.join("\n")}\n</div>`;
 }
 
@@ -20,22 +22,22 @@ export function renderFailureToHtml(statusHtml: string, chunks: OutputChunk[]): 
   return output ? `${statusHtml}\n${output}` : statusHtml;
 }
 
-export function renderChunkToHtml(chunk: OutputChunk): string {
+export function renderChunkToHtml(chunk: OutputChunk, format = "html"): string {
   switch (chunk.type) {
     case "stream":
       return chunk.stream === "stderr"
         ? `<pre class="nb-stream-stderr">${escapeHtml(chunk.text)}</pre>`
-        : `<pre class="nb-stream-stdout">${escapeHtml(chunk.text)}</pre>`;
+        : renderFormattedOutput(chunk.text, format);
     case "error":
       return `<pre class="nb-stream-stderr">${escapeHtml(chunk.text)}</pre>`;
     case "rich":
-      return renderRich(chunk.mime, chunk.data);
+      return renderRich(chunk.mime, chunk.data, format);
     case "truncated":
       return `<div class="nb-output-truncated">Output truncated after ${formatBytes(chunk.limitBytes)}</div>`;
   }
 }
 
-function renderRich(mime: string, data: string): string {
+function renderRich(mime: string, data: string, format = "html"): string {
   switch (mime) {
     case "text/html":
       return `<div class="nb-output-html">${collapseStyleTags(data)}</div>`;
@@ -48,8 +50,26 @@ function renderRich(mime: string, data: string): string {
       return `<div class="nb-output-markdown">${data}</div>`;
     case "text/plain":
     default:
-      return `<pre class="nb-stream-stdout">${escapeHtml(data)}</pre>`;
+      return renderFormattedOutput(data, format);
   }
+}
+
+function renderFormattedOutput(text: string, format: string): string {
+  const language = normaliseOutputFormat(format);
+  if (language === "html" || language === "image") {
+    return `<pre class="nb-stream-stdout">${escapeHtml(text)}</pre>`;
+  }
+  const longestFence = Math.max(
+    0,
+    ...Array.from(text.matchAll(/`+/g), (match) => match[0].length),
+  );
+  const fence = "`".repeat(Math.max(3, longestFence + 1));
+  const newline = text.endsWith("\n") ? "" : "\n";
+  return `${fence}${language}\n${text}${newline}${fence}`;
+}
+
+export function normaliseOutputFormat(format: string): string {
+  return /^[A-Za-z0-9_-]+$/.test(format) ? format : "html";
 }
 
 /**

@@ -20,6 +20,23 @@ describe('renderChunksToHtml', () => {
     expect(html).toContain('hello');
   });
 
+  it('stores a code format as a fenced Markdown block', () => {
+    const chunks: OutputChunk[] = [{ type: 'stream', stream: 'stdout', text: '{"ok": true}\n' }];
+    const html = renderChunksToHtml(chunks, 'json');
+    expect(html).toBe('```json\n{"ok": true}\n```');
+  });
+
+  it('falls back to HTML for an unsafe format name', () => {
+    const chunks: OutputChunk[] = [{ type: 'stream', stream: 'stdout', text: 'hello' }];
+    expect(renderChunksToHtml(chunks, 'json\" onclick=\"bad'))
+      .toContain('<pre class="nb-stream-stdout">hello</pre>');
+  });
+
+  it('uses a longer fence when output contains backticks', () => {
+    const chunks: OutputChunk[] = [{ type: 'stream', stream: 'stdout', text: '```\n' }];
+    expect(renderChunksToHtml(chunks, 'json')).toBe('````json\n```\n````');
+  });
+
   it('wraps stderr in pre.nb-stream-stderr', () => {
     const chunks: OutputChunk[] = [{ type: 'stream', stream: 'stderr', text: 'oops\n' }];
     const html = renderChunksToHtml(chunks);

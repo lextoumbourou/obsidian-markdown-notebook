@@ -19,6 +19,7 @@ import {
   renderChunksToHtml,
   renderFailureToHtml,
   extractImageData,
+  normaliseOutputFormat,
   OutputChunk,
 } from "./output/MimeRenderer";
 import { renderHtmlToPng } from "./output/HtmlToImage";
@@ -206,7 +207,9 @@ export async function runCell(
     ? readNotebookFrontmatter(app, file)
     : {};
   const timeout = fm.timeout ?? settings.executionTimeout;
-  const pendingFormat = (cell.format ?? fm.format ?? settings.defaultFormat) as OutputFormat;
+  const pendingFormat = normaliseOutputFormat(
+    cell.format ?? fm.format ?? settings.defaultFormat,
+  );
   const output = new OutputLimiter(
     fm.outputLimit ?? settings.outputLimitKb,
     pendingFormat === "image",
@@ -545,7 +548,9 @@ async function buildOutput(
   assertActive: () => void,
 ): Promise<{ content: string; format: OutputFormat }> {
   assertActive();
-  const outputFormat = runArgs.format ?? fm.format ?? settings.defaultFormat;
+  const outputFormat = normaliseOutputFormat(
+    runArgs.format ?? fm.format ?? settings.defaultFormat,
+  );
   const mediaPath = fm.media ?? settings.mediaPath;
   const markdownLinks = fm.markdownLinks ?? settings.markdownImageLinks;
 
@@ -563,5 +568,5 @@ async function buildOutput(
     }
   }
   assertActive();
-  return { content: renderChunksToHtml(chunks), format: "html" };
+  return { content: renderChunksToHtml(chunks, outputFormat), format: outputFormat };
 }
