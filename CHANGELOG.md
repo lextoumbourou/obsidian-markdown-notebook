@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.5.0] - 2026-08-06
 
 ### Added
 - Managed background cells for Python, JavaScript, Bash, and R via `{background=<name>}`. Background cells run in fresh processes, let Run All continue immediately, and expose a Stop button in the note
