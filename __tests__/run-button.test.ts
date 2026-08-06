@@ -14,6 +14,12 @@ class FakeClassList {
 
   add(value: string) { this.values.add(value); }
   remove(value: string) { this.values.delete(value); }
+  toggle(value: string, force?: boolean) {
+    const enabled = force ?? !this.values.has(value);
+    if (enabled) this.values.add(value);
+    else this.values.delete(value);
+    return enabled;
+  }
   contains(value: string) { return this.values.has(value); }
 }
 
@@ -271,5 +277,60 @@ describe('Run button', () => {
     expect(markdown).toContain('status="error"');
     expect(markdown).toContain('Execution was interrupted');
     expect(markdown).not.toContain('status="running"');
+  });
+
+  it('starts and stops a named background cell from the same button', async () => {
+    const source = 'serve()';
+    let markdown = `\`\`\`python {background=server}\n${source}\n\`\`\``;
+    const file = new TFile();
+    file.path = 'note.md';
+    Object.assign(file, { extension: 'md', parent: { path: '' } });
+    const app = {
+      metadataCache: { getFileCache: jest.fn(() => null) },
+      workspace: { getLeavesOfType: jest.fn(() => []) },
+      vault: {
+        getAbstractFileByPath: jest.fn(() => file),
+        process: jest.fn(async (_file: TFile, transform: (raw: string) => string) => {
+          markdown = transform(markdown);
+        }),
+      },
+    };
+    let running = false;
+    const background = {
+      start: jest.fn(async (_request, onChunk: (chunk: unknown) => void) => {
+        running = true;
+        onChunk({ type: 'stream', stream: 'stdout', text: 'ready\n' });
+      }),
+      stop: jest.fn(async () => { running = false; return true; }),
+      isRunning: jest.fn(() => running),
+    };
+    const context = {
+      app,
+      getSettings: () => DEFAULT_SETTINGS,
+      acquireKernel: jest.fn(),
+      peekExecutionCount: () => 0,
+      background,
+    };
+    const ctx = {
+      sourcePath: file.path,
+      getSectionInfo: () => ({ text: markdown, lineStart: 0, lineEnd: 2 }),
+    } as unknown as MarkdownPostProcessorContext;
+    Object.assign(globalThis, { window: {}, HTMLPreElement: FakeElement });
+    const root = new FakeElement();
+
+    await processCodeBlock(source, root as unknown as HTMLElement, ctx, context as never, 'python');
+    const button = root.querySelector('.nb-run-button')!;
+    await button.click();
+
+    expect(background.start).toHaveBeenCalledTimes(1);
+    expect(context.acquireKernel).not.toHaveBeenCalled();
+    expect(button.textContent).toBe('■ Stop');
+    expect(markdown).toContain('Background process &quot;server&quot; started.');
+
+    await button.click();
+
+    expect(background.stop).toHaveBeenCalledWith('note.md', 'server');
+    expect(button.textContent).toBe('▶ Run');
+    expect(markdown).toContain('Background process &quot;server&quot; stopped.');
   });
 });

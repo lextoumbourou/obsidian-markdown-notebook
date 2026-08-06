@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- Managed background cells for Python, JavaScript, Bash, and R via `{background=<name>}`. Background cells run in fresh processes, let Run All continue immediately, and expose a Stop button in the note
+- Automatic cleanup of notebook-managed background processes when a cell is stopped, its note closes or is renamed or deleted, kernels restart, the plugin unloads, or a headless CLI run ends
+- Background-process coverage in the example vault and implementation notes for the lifecycle design
+
+### Changed
+- Background-cell startup output is persisted, while later output is drained into a bounded in-memory buffer so long-running processes cannot grow the note without limit
+
 ## [0.4.0] - 2026-08-04
 
 ### Added

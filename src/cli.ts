@@ -32,6 +32,7 @@ import { ShellKernel } from "./kernels/ShellKernel";
 import { RKernel } from "./kernels/RKernel";
 import type { BaseKernel } from "./kernels/BaseKernel";
 import { resolveExecutable } from "./NotebookKernelConfig";
+import { BackgroundProcessManager } from "./BackgroundProcessManager";
 
 // hashCodeFence uses the Web Crypto API; expose it on Node < 19
 if (!globalThis.crypto) {
@@ -394,6 +395,7 @@ async function main(): Promise<void> {
   };
 
   const kernels = new Map<string, AnyKernel>();
+  const backgrounds = new BackgroundProcessManager();
   const getKernel = (lang: string): AnyKernel => {
     let k = kernels.get(lang);
     if (!k) {
@@ -401,6 +403,15 @@ async function main(): Promise<void> {
       kernels.set(lang, k);
     }
     return k;
+  };
+  const backgroundExecutable = (lang: string): string => {
+    switch (lang) {
+      case "python": return paths.python;
+      case "javascript": return paths.node;
+      case "bash": return paths.shell;
+      case "r": return paths.r;
+      default: return paths.shell;
+    }
   };
 
   let failed = false;
@@ -420,19 +431,36 @@ async function main(): Promise<void> {
     const chunks = output.chunks;
     let failure: OutputStatus | null = null;
     try {
-      await getKernel(block.language).execute(
-        block.source,
-        (chunk) => {
-          const accepted = output.add(chunk);
-          printChunk(chunk, opts.write);
-          if (opts.write) {
-            for (const item of accepted) {
-              if (item.type === "truncated") printChunk(item, true);
-            }
+      const onChunk = (chunk: OutputChunk) => {
+        const accepted = output.add(chunk);
+        printChunk(chunk, opts.write);
+        if (opts.write) {
+          for (const item of accepted) {
+            if (item.type === "truncated") printChunk(item, true);
           }
-        },
-        timeout
-      );
+        }
+      };
+      if (block.background) {
+        await backgrounds.start({
+          sourcePath: filePath,
+          name: block.background,
+          language: block.language,
+          source: block.source,
+          executable: backgroundExecutable(block.language),
+          cwd,
+        }, onChunk);
+        onChunk({
+          type: "stream",
+          stream: "stdout",
+          text: `Background process "${block.background}" started.\n`,
+        });
+      } else {
+        await getKernel(block.language).execute(
+          block.source,
+          onChunk,
+          timeout
+        );
+      }
     } catch (err) {
       failed = true;
       failure = err instanceof KernelTimeoutError ? "timeout" : "error";
@@ -450,6 +478,7 @@ async function main(): Promise<void> {
     }
     results.push({ block, chunks, nativeImageData: output.nativeImageData, failure });
   }
+  await backgrounds.stopAll();
   for (const k of kernels.values()) k.stop();
 
   if (opts.write) {

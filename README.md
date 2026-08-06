@@ -44,6 +44,7 @@ Comment markers are invisible in all standard Markdown renderers — including P
 - **Rich output rendering** — HTML tables, matplotlib plots, plain text, and saved images
 - **Execution count** — `[N]` badge on each run button, Jupyter-style, resets on kernel restart
 - **Run All** — execute every cell in the note in order with a single command
+- **Managed background cells** — start and stop long-running servers from Python, JavaScript, Bash, or R cells without blocking later cells
 - **Clear outputs** — remove one cell's persisted output or every output block in the active note
 - **Notebook-scoped kernel state** — variables are shared between cells in one note but isolated from other notes
 - **Predictable relative paths** — every kernel starts in the note's folder, so `data.csv` and other relative paths work naturally
@@ -87,6 +88,24 @@ For notebook-wide execution, click **▶ Run all cells** at the top of the readi
 In Live Preview or Source mode, place the cursor inside a supported code cell (or its persisted output) and run **Markdown Notebook: Run cell under cursor** from the command palette. Assign any hotkey to this command in Obsidian's **Hotkeys** settings for a fast edit-run loop without switching views. Press the command again while that cell is running to stop it.
 
 The editor commands **Run all cells above cursor** and **Run cell and all cells below cursor** rebuild only the required portion of shared kernel state. “Above” excludes the cursor cell; “below” includes it. Both use the same progress, error-handling, and persisted-output behavior as Run All.
+
+### Background processes
+
+Add `background=<name>` to run a long-lived process without blocking the notebook:
+
+````markdown
+```python {background=server}
+from http.server import HTTPServer, SimpleHTTPRequestHandler
+
+HTTPServer(("127.0.0.1", 8000), SimpleHTTPRequestHandler).serve_forever()
+```
+````
+
+The cell runs in a fresh process. Its **Run** button becomes **Stop**, and Run All immediately continues to the next cell. The same syntax works with `javascript`, `bash`, and `r` fences. The process uses that language's configured executable and the note's configured working directory.
+
+Background names are scoped to a note. The plugin stops its processes when you press **Stop**, close or rename the note, restart its kernels, or unload the plugin. If a process exits by itself, the button returns to **Run**. Startup output is stored in the note, but later output is only drained in memory so a long-running server cannot grow the Markdown file without limit.
+
+Use a unique name for each concurrent process in a note. A second cell cannot start a process while the same name is already running.
 
 Language exceptions and non-zero shell exit codes produce `status="error"` output blocks. The failure marker is stored together with everything emitted before the failure and the escaped traceback or stderr, so diagnostics remain available after reopening the note.
 

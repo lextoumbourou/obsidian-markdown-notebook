@@ -8,6 +8,7 @@ export interface RunBlock {
   source: string;
   id: string | undefined;
   format: string | undefined;
+  background: string | undefined;
   lineStart: number;
   lineEnd: number;
 }
@@ -49,13 +50,22 @@ export function parseRunBlocks(content: string): RunBlock[] {
         const args = fenceMatch[2] ?? "";
         const id = args.match(/id=(\S+)/)?.[1];
         const format = args.match(/format=(\S+)/)?.[1];
+        const background = args.match(/background=(\S+)/)?.[1];
         const sourceLines: string[] = [];
         i++;
         while (i < lines.length && !lines[i].startsWith("```")) {
           sourceLines.push(lines[i]);
           i++;
         }
-        blocks.push({ language: lang, source: sourceLines.join("\n"), id, format, lineStart, lineEnd: i });
+        blocks.push({
+          language: lang,
+          source: sourceLines.join("\n"),
+          id,
+          format,
+          background,
+          lineStart,
+          lineEnd: i,
+        });
       }
     }
     i++;

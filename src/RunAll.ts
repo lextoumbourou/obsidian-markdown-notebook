@@ -26,6 +26,7 @@ import type { BaseKernel } from "./kernels/BaseKernel";
 import type { ShellKernel } from "./kernels/ShellKernel";
 import type { PluginSettings } from "./settings/Settings";
 import { readNotebookFrontmatter, NotebookFrontmatter } from "./NotebookFrontmatter";
+import type { BackgroundExecutionContext } from "./BackgroundProcessManager";
 
 type AnyKernel = BaseKernel | ShellKernel;
 
@@ -167,6 +168,7 @@ export async function runAll(
   settings: PluginSettings,
   hooks: RunAllHooks = {},
   range?: RunAllRange,
+  background?: BackgroundExecutionContext,
 ): Promise<RunAllSummary> {
   const sourcePath = file.path;
   const activeOwner = runAllFilesInFlight.get(file) ?? runAllInFlight.get(sourcePath);
@@ -261,6 +263,7 @@ export async function runAll(
     // through the notebook and silently discard its state.
     const kernels = new Map<string, AnyKernel>();
     for (const block of blocks) {
+      if (block.background) continue;
       if (!kernels.has(block.language)) {
         kernels.set(block.language, getKernel(block.language));
       }
@@ -309,12 +312,35 @@ export async function runAll(
 
       let failure: OutputStatus | null = null;
       try {
-        await kernels.get(block.language)!.execute(
-          block.source,
-          (chunk) => { output.add(chunk); },
-          timeout,
-          controller.signal,
-        );
+        if (block.background) {
+          if (!background) throw new Error("Background cells are unavailable in this runner");
+          if (background.isRunning(sourcePath, block.background)) {
+            output.add({
+              type: "stream",
+              stream: "stdout",
+              text: `Background process "${block.background}" is already running.\n`,
+            });
+          } else {
+            await background.start({
+              sourcePath,
+              name: block.background,
+              language: block.language,
+              source: block.source,
+            }, (chunk) => { output.add(chunk); }, controller.signal);
+            output.add({
+              type: "stream",
+              stream: "stdout",
+              text: `Background process "${block.background}" started.\n`,
+            });
+          }
+        } else {
+          await kernels.get(block.language)!.execute(
+            block.source,
+            (chunk) => { output.add(chunk); },
+            timeout,
+            controller.signal,
+          );
+        }
         if (controller.signal.aborted) throw new KernelCancelledError();
         throwIfRunCancelled(generation);
       } catch (err) {

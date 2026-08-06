@@ -12,6 +12,7 @@ import {
   RunButtonContext,
   hasActiveCellRun,
   isCellInFlight,
+  updateBackgroundButtons,
 } from "./RunButton";
 import { activateRunAll, disposeRunAll, isRunAllActive, runAll } from "./RunAll";
 import { clearAllOutputBlocks, clearOutputBlock, clearStaleRunningBlocks } from "./OutputBlock";
@@ -30,6 +31,12 @@ import {
   runAllToolbarHooks,
   setRunAllToolbarVisible,
 } from "./RunAllToolbar";
+import {
+  BackgroundCellRequest,
+  BackgroundExecutionContext,
+  BackgroundProcessManager,
+} from "./BackgroundProcessManager";
+import type { OutputChunk } from "./output/MimeRenderer";
 
 type AnyKernel = BaseKernel | ShellKernel;
 
@@ -42,6 +49,9 @@ export default class MarkdownNotebookPlugin extends Plugin {
   settings: PluginSettings;
   private kernels: Map<string, KernelSession> = new Map();
   private runButtonContext?: RunButtonContext;
+  private backgrounds = new BackgroundProcessManager((sourcePath, name, running) => {
+    updateBackgroundButtons(sourcePath, name, running ? "running" : "idle");
+  });
 
   async onload() {
     activateRunAll();
@@ -49,12 +59,19 @@ export default class MarkdownNotebookPlugin extends Plugin {
     await this.loadSettings();
     this.addSettingTab(new SettingsTab(this.app, this));
 
+    const background: BackgroundExecutionContext = {
+      start: (request, onChunk, signal) =>
+        this.startBackground(request, onChunk, signal),
+      stop: (sourcePath, name) => this.backgrounds.stop(sourcePath, name),
+      isRunning: (sourcePath, name) => this.backgrounds.isRunning(sourcePath, name),
+    };
     const context: RunButtonContext = {
       app: this.app,
       getSettings: () => this.settings,
       acquireKernel: (lang: string, sourcePath: string) => this.acquireKernel(lang, sourcePath),
       peekExecutionCount: (lang: string, sourcePath: string) =>
         this.peekExecutionCount(lang, sourcePath),
+      background,
     };
     this.runButtonContext = context;
     void setRunAllToolbarVisible(this.settings.showRunAllToolbar, context);
@@ -160,6 +177,8 @@ export default class MarkdownNotebookPlugin extends Plugin {
           (lang) => this.acquireKernel(lang, file.path),
           this.settings,
           runAllToolbarHooks(file.path),
+          undefined,
+          background,
         );
       },
     });
@@ -233,6 +252,7 @@ export default class MarkdownNotebookPlugin extends Plugin {
     disposeRunAllToolbar();
     for (const session of this.kernels.values()) session.kernel.stop();
     this.kernels.clear();
+    void this.backgrounds.stopAll();
   }
 
   peekExecutionCount(lang: string, sourcePath: string): number {
@@ -285,6 +305,7 @@ export default class MarkdownNotebookPlugin extends Plugin {
       session.kernel.stop();
       this.kernels.delete(sessionKey);
     }
+    void this.backgrounds.stopForNote(notePath);
   }
 
   private reapClosedNotebookSessions(): void {
@@ -297,6 +318,9 @@ export default class MarkdownNotebookPlugin extends Plugin {
       if (!openPaths.has(session.config.notePath)) {
         this.stopSessionsForNote(session.config.notePath);
       }
+    }
+    for (const sourcePath of this.backgrounds.sourcePaths()) {
+      if (!openPaths.has(sourcePath)) void this.backgrounds.stopForNote(sourcePath);
     }
   }
 
@@ -338,6 +362,7 @@ export default class MarkdownNotebookPlugin extends Plugin {
       this.settings,
       runAllToolbarHooks(file.path, true),
       { mode, target: block },
+      this.runButtonContext?.background,
     );
   }
 
@@ -387,6 +412,11 @@ export default class MarkdownNotebookPlugin extends Plugin {
     };
 
     const targetLanguage = key ? langForKey[key] : undefined;
+    if (targetLanguage) {
+      void this.backgrounds.stopLanguage(targetLanguage);
+    } else {
+      void this.backgrounds.stopAll();
+    }
     for (const [sessionKey, session] of this.kernels) {
       if (targetLanguage && session.config.language !== targetLanguage) continue;
       session.kernel.stop();
@@ -395,6 +425,29 @@ export default class MarkdownNotebookPlugin extends Plugin {
 
     const label = key ? langForKey[key] : "all";
     new Notice(`${label.charAt(0).toUpperCase() + label.slice(1)} kernel${key ? "" : "s"} restarted`);
+  }
+
+  private async startBackground(
+    request: BackgroundCellRequest,
+    onChunk: (chunk: OutputChunk) => void,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const file = this.app.vault.getAbstractFileByPath(request.sourcePath);
+    if (!(file instanceof TFile)) {
+      throw new Error(`Cannot start a background cell: ${request.sourcePath} is not a Markdown file`);
+    }
+    const config = resolveNotebookKernelConfig(
+      this.app,
+      file,
+      request.language,
+      this.settings,
+      readNotebookFrontmatter(this.app, file),
+    );
+    await this.backgrounds.start({
+      ...request,
+      executable: config.executable,
+      cwd: config.cwd,
+    }, onChunk, signal);
   }
 
   async loadSettings() {

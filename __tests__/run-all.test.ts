@@ -174,6 +174,23 @@ describe('parseRunBlocks', () => {
     expect(blocks[1].language).toBe('r');
   });
 
+  it('parses named background cells for every supported language', () => {
+    const content = [
+      '```python {background=python-server}', 'serve()', '```',
+      '```javascript {background=node-server}', 'serve()', '```',
+      '```bash {background=shell-server}', 'serve', '```',
+      '```r {background=r-server}', 'serve()', '```',
+    ].join('\n');
+    const blocks = parseRunBlocks(content);
+
+    expect(blocks.map((block) => [block.language, block.background])).toEqual([
+      ['python', 'python-server'],
+      ['javascript', 'node-server'],
+      ['bash', 'shell-server'],
+      ['r', 'r-server'],
+    ]);
+  });
+
   it('resolves language aliases to canonical names', () => {
     const content = '```js\nconsole.log(1)\n```\n\n```sh\nls\n```\n';
     const blocks = parseRunBlocks(content);
@@ -255,6 +272,48 @@ describe('runAll', () => {
 
     expect(acquire).toHaveBeenCalledTimes(1);
     expect(kernel.execute).toHaveBeenCalledTimes(2);
+  });
+
+  it('starts a background cell and continues to later cells', async () => {
+    const memory = memoryNotebook([
+      '```python {background=server}', 'serve()', '```',
+      '',
+      '```python', 'print("client")', '```',
+    ].join('\n'));
+    let running = false;
+    const background = {
+      start: jest.fn(async (_request, onChunk: (chunk: unknown) => void) => {
+        running = true;
+        onChunk({ type: 'stream', stream: 'stdout', text: 'ready\n' });
+      }),
+      stop: jest.fn(async () => { running = false; return true; }),
+      isRunning: jest.fn(() => running),
+    };
+    const kernel = {
+      executionCount: 0,
+      execute: jest.fn(async (_source: string, onChunk: (chunk: unknown) => void) => {
+        onChunk({ type: 'stream', stream: 'stdout', text: 'client\n' });
+      }),
+    };
+    const acquire = jest.fn(() => kernel);
+
+    const result = await runAll(
+      memory.app as never,
+      memory.file,
+      acquire as never,
+      DEFAULT_SETTINGS,
+      {},
+      undefined,
+      background,
+    );
+
+    expect(result).toEqual({ total: 2, succeeded: 2, failed: 0, skipped: false });
+    expect(background.start).toHaveBeenCalledTimes(1);
+    expect(acquire).toHaveBeenCalledTimes(1);
+    expect(kernel.execute).toHaveBeenCalledWith(
+      'print("client")', expect.any(Function), expect.any(Number), expect.any(AbortSignal),
+    );
+    expect(memory.content()).toContain('Background process &quot;server&quot; started.');
   });
 
   it('continues after a failed cell when stop on first error is disabled', async () => {

@@ -10,6 +10,7 @@ import {
 import type { BaseKernel } from "./kernels/BaseKernel";
 import type { ShellKernel } from "./kernels/ShellKernel";
 import type { PluginSettings } from "./settings/Settings";
+import type { BackgroundExecutionContext } from "./BackgroundProcessManager";
 
 type AnyKernel = BaseKernel | ShellKernel;
 
@@ -17,6 +18,7 @@ export interface RunAllToolbarContext {
   app: App;
   acquireKernel: (language: string, sourcePath: string) => AnyKernel;
   getSettings: () => PluginSettings;
+  background?: BackgroundExecutionContext;
 }
 
 const toolbarTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -260,6 +262,8 @@ async function renderToolbarInHost(
           (language) => context.acquireKernel(language, currentFile.path),
           context.getSettings(),
           runAllToolbarHooks(currentFile.path),
+          undefined,
+          context.background,
         );
       });
     }

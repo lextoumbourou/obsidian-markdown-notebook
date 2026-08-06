@@ -29,6 +29,10 @@ import type { ShellKernel } from "./kernels/ShellKernel";
 import type { PluginSettings } from "./settings/Settings";
 import { readNotebookFrontmatter, NotebookFrontmatter } from "./NotebookFrontmatter";
 import { scheduleRunAllToolbarRender } from "./RunAllToolbar";
+import type {
+  BackgroundCellRequest,
+  BackgroundExecutionContext,
+} from "./BackgroundProcessManager";
 
 type AnyKernel = BaseKernel | ShellKernel;
 
@@ -47,6 +51,43 @@ interface ActiveCellRun {
 }
 
 const activeCellRuns = new Map<string, ActiveCellRun>();
+const backgroundCellButtons = new Map<string, Set<HTMLButtonElement>>();
+
+function backgroundKey(sourcePath: string, name: string): string {
+  return `${sourcePath}::${name}`;
+}
+
+function registerBackgroundButton(
+  sourcePath: string,
+  name: string,
+  button: HTMLButtonElement,
+): void {
+  const key = backgroundKey(sourcePath, name);
+  let buttons = backgroundCellButtons.get(key);
+  if (!buttons) {
+    buttons = new Set();
+    backgroundCellButtons.set(key, buttons);
+  }
+  buttons.add(button);
+}
+
+export function updateBackgroundButtons(
+  sourcePath: string,
+  name: string,
+  phase: "running" | "stopping" | "idle",
+): void {
+  const key = backgroundKey(sourcePath, name);
+  const buttons = backgroundCellButtons.get(key);
+  if (!buttons) return;
+  for (const button of buttons) {
+    button.classList.toggle("nb-run-button--running", phase !== "idle");
+    button.disabled = phase === "stopping";
+    button.setText(
+      phase === "running" ? "■ Stop" : phase === "stopping" ? "■ Stopping…" : "▶ Run",
+    );
+  }
+  if (phase === "idle") backgroundCellButtons.delete(key);
+}
 
 function updateCellRunButtons(run: ActiveCellRun): void {
   for (const button of run.buttons) {
@@ -85,6 +126,7 @@ export interface RunButtonContext {
   getSettings: () => PluginSettings;
   acquireKernel: (lang: string, sourcePath: string) => AnyKernel;
   peekExecutionCount: (lang: string, sourcePath: string) => number;
+  background?: BackgroundExecutionContext;
 }
 
 /** Args parsed from `{key=value}` pairs in the fence info string. */
@@ -100,6 +142,7 @@ export interface RunnableCell {
   lineEnd: number;
   id?: string;
   format?: string;
+  background?: string;
 }
 
 interface RunCellOptions {
@@ -188,12 +231,31 @@ export async function runCell(
 
     let failure: "error" | "timeout" | "cancelled" | null = null;
     try {
-      executedKernel = context.acquireKernel(cell.language, sourcePath);
-      await executedKernel.execute(cell.source, (chunk) => {
+      const onChunk = (chunk: OutputChunk) => {
         for (const accepted of output.add(chunk)) {
           if (options.liveEl) appendChunkToElement(options.liveEl, accepted);
         }
-      }, timeout, controller.signal);
+      };
+      if (cell.background) {
+        if (!context.background) {
+          throw new Error("Background cells are unavailable in this runner");
+        }
+        const request: BackgroundCellRequest = {
+          sourcePath,
+          name: cell.background,
+          language: cell.language,
+          source: cell.source,
+        };
+        await context.background.start(request, onChunk, controller.signal);
+        onChunk({
+          type: "stream",
+          stream: "stdout",
+          text: `Background process "${cell.background}" started.\n`,
+        });
+      } else {
+        executedKernel = context.acquireKernel(cell.language, sourcePath);
+        await executedKernel.execute(cell.source, onChunk, timeout, controller.signal);
+      }
       run.phase = "finishing";
       updateCellRunButtons(run);
     } catch (err) {
@@ -271,7 +333,15 @@ export async function runCell(
     options.liveEl?.remove();
     inFlight.delete(flightKey);
     if (activeCellRuns.get(flightKey) === run) activeCellRuns.delete(flightKey);
-    resetCellRunButtons(run);
+    if (
+      cell.background
+      && context.background?.isRunning(sourcePath, cell.background)
+    ) {
+      if (options.button) registerBackgroundButton(sourcePath, cell.background, options.button);
+      updateBackgroundButtons(sourcePath, cell.background, "running");
+    } else {
+      resetCellRunButtons(run);
+    }
     options.onExecutionCount?.(
       executedKernel?.executionCount
       ?? context.peekExecutionCount(cell.language, sourcePath),
@@ -287,6 +357,13 @@ export async function runOrStopCell(
   context: RunButtonContext,
 ): Promise<"started" | "stopped" | "finishing"> {
   const hash = await hashCodeFence(cell.language, cell.source);
+  if (
+    cell.background
+    && context.background?.isRunning(sourcePath, cell.background)
+  ) {
+    await stopBackgroundCell(sourcePath, file, cell, context, hash);
+    return "stopped";
+  }
   const activeRun = activeCellRuns.get(`${sourcePath}::${hash}`);
   if (activeRun) {
     if (activeRun.phase === "running") {
@@ -300,6 +377,36 @@ export async function runOrStopCell(
 
   await runCell(sourcePath, file, cell, context, { hash });
   return "started";
+}
+
+async function stopBackgroundCell(
+  sourcePath: string,
+  file: TFile,
+  cell: RunnableCell,
+  context: RunButtonContext,
+  hash: string,
+): Promise<boolean> {
+  const name = cell.background;
+  if (!name || !context.background) return false;
+  updateBackgroundButtons(sourcePath, name, "stopping");
+  const stopped = await context.background.stop(sourcePath, name);
+  updateBackgroundButtons(sourcePath, name, "idle");
+  if (stopped) {
+    await writeOutputBlock(
+      context.app,
+      file,
+      { language: cell.language, source: cell.source, hintLine: cell.lineEnd },
+      hash,
+      renderChunksToHtml([{
+        type: "stream",
+        stream: "stdout",
+        text: `Background process "${name}" stopped.\n`,
+      }]),
+      "html",
+      cell.id,
+    );
+  }
+  return stopped;
 }
 
 /**
@@ -329,6 +436,24 @@ export async function processCodeBlock(
     cls: "nb-run-button",
     text: "▶ Run",
   });
+  const initialSectionInfo = ctx.getSectionInfo(el);
+  let initialArgs: RunArgs = {};
+  if (initialSectionInfo) {
+    const lines = initialSectionInfo.text.split("\n");
+    for (let i = initialSectionInfo.lineStart; i <= initialSectionInfo.lineEnd; i++) {
+      const line = lines[i] ?? "";
+      if (line.startsWith("```")) {
+        initialArgs = parseRunArgs(line);
+        break;
+      }
+    }
+  }
+  if (initialArgs.background) {
+    registerBackgroundButton(ctx.sourcePath, initialArgs.background, button);
+    if (context.background?.isRunning(ctx.sourcePath, initialArgs.background)) {
+      updateBackgroundButtons(ctx.sourcePath, initialArgs.background, "running");
+    }
+  }
   const existingRun = activeCellRuns.get(flightKey);
   if (existingRun) {
     existingRun.buttons.add(button);
@@ -359,6 +484,30 @@ export async function processCodeBlock(
       }
     }
 
+    if (
+      runArgs.background
+      && context.background?.isRunning(ctx.sourcePath, runArgs.background)
+    ) {
+      const candidate = app.vault.getAbstractFileByPath(ctx.sourcePath);
+      if (candidate instanceof TFile) {
+        await stopBackgroundCell(
+          ctx.sourcePath,
+          candidate,
+          {
+            id: runArgs.id,
+            format: runArgs.format,
+            background: runArgs.background,
+            language,
+            source: src,
+            lineEnd: sectionInfo?.lineEnd ?? 0,
+          },
+          context,
+          hash,
+        );
+      }
+      return;
+    }
+
     const liveEl = el.createDiv({ cls: "nb-live-output" });
     const candidate = app.vault.getAbstractFileByPath(ctx.sourcePath);
     const started = await runCell(
@@ -367,6 +516,7 @@ export async function processCodeBlock(
       {
         id: runArgs.id,
         format: runArgs.format,
+        background: runArgs.background,
         language,
         source: src,
         lineEnd: sectionInfo?.lineEnd ?? 0,

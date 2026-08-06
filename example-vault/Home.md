@@ -17,6 +17,7 @@ A manual smoke-test vault for the plugin. One note per language, plus notes for 
 - [JavaScript](JavaScript.md) — console output, object display, state, `js` alias, errors
 - [Timeouts](Timeouts.md) — per-note timeout frontmatter, ⏱ timeout blocks, recovery after timeout
 - [Frontmatter Defaults](Frontmatter%20Defaults.md) — note-level `notebook:` defaults (format, media folder, markdown links)
+- [Background Processes](Background%20Processes.md) — start a Python server, call it from a later cell, and stop it from the notebook
 
 Run cells individually with **▶ Run**, and also test the **Run all cells** command on at least one note.
 
