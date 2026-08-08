@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## [0.6.0] - 2026-08-08
 
 ### Added
 - Code languages such as `format=json` now store plain text output as syntax-highlighted Markdown fences. The default remains `format=html`
