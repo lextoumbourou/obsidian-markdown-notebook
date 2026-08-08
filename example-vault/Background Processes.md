@@ -1,10 +1,20 @@
+---
+notebook:
+  readyTimeout: 5000
+---
+
 # Background Processes
 
-This note starts a server in a separate Python process. Its Run button becomes Stop, and Run All continues to the client cell without waiting for the server to exit.
+This note tests both background readiness modes. Click **Run all cells**. It
+waits for each background process to become ready before it runs the next cell.
 
-## 1. Start the server
+## 1. Wait for a TCP port
 
-```python {background=example-server}
+The server deliberately waits two seconds before it binds the port. The client
+cell must still succeed.
+
+```python {background=example-server ready=port:18765}
+import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 class Handler(BaseHTTPRequestHandler):
@@ -18,15 +28,47 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass
 
-HTTPServer(("127.0.0.1", 8765), Handler).serve_forever()
+time.sleep(2)
+HTTPServer(("127.0.0.1", 18765), Handler).serve_forever()
 ```
 
-## 2. Call it from the normal notebook kernel
+## 2. Call the ready server
 
 ```python
 from urllib.request import urlopen
 
-urlopen("http://127.0.0.1:8765").read().decode()
+urlopen("http://127.0.0.1:18765").read().decode()
 ```
 
-Click **Stop** on the first cell when you finish. The same `background=<name>` argument also works on JavaScript, Bash, and R cells.
+The result must be `Hello from a background cell`.
+
+## 3. Wait for literal output
+
+This worker writes its readiness message in two stdout chunks, with stderr
+between them. It tests quoted arguments, chunk boundaries and separate stream
+matching.
+
+```python {background=example-worker ready="Worker ready" context=none}
+import sys
+import time
+
+sys.stdout.write("Worker ")
+sys.stdout.flush()
+sys.stderr.write("Worker is starting...\n")
+sys.stderr.flush()
+time.sleep(1)
+sys.stdout.write("ready\n")
+sys.stdout.flush()
+
+while True:
+    time.sleep(1)
+```
+
+## 4. Confirm Run All continued
+
+```python
+print("Run All waited for both background processes.")
+```
+
+Click **Stop** on both background cells when you finish. The same
+`background=<name>` argument also works on JavaScript, Bash and R cells.

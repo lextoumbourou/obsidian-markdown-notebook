@@ -170,6 +170,7 @@ export interface NotebookFm {
   format?: "html" | "image";
   media?: string;
   timeout?: number;
+  readyTimeout?: number;
   outputLimit?: number;
   markdownLinks?: boolean;
   cwd?: string;
@@ -203,6 +204,7 @@ export function parseNotebookFrontmatter(content: string): NotebookFm {
     if (key === "format" && (val === "html" || val === "image")) fm.format = val;
     else if (key === "media") fm.media = val;
     else if (key === "timeout" && !isNaN(Number(val))) fm.timeout = Number(val);
+    else if (key === "readyTimeout" && Number(val) > 0) fm.readyTimeout = Number(val);
     else if (key === "outputLimit" && Number(val) > 0) fm.outputLimit = Number(val);
     else if (key === "markdownLinks") fm.markdownLinks = val === "true";
     else if (key === "cwd") fm.cwd = val;
@@ -459,6 +461,8 @@ async function main(): Promise<void> {
           source: program.source,
           precedingCellCount: program.precedingCellCount,
           sourceMap: program.sourceMap,
+          ready: block.ready,
+          readyTimeoutMs: fm.readyTimeout,
           executable: backgroundExecutable(block.language),
           cwd,
         }, onChunk);

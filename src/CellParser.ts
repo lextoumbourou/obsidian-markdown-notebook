@@ -10,8 +10,44 @@ export interface RunBlock {
   format: string | undefined;
   background: string | undefined;
   context: string | undefined;
+  ready: string | undefined;
   lineStart: number;
   lineEnd: number;
+}
+
+export type FenceArgs = Record<string, string>;
+
+/** Parse `key=value` fence attributes. Values can be unquoted words or
+ * double-quoted literals containing whitespace. Quotes do not support escape
+ * sequences, and unknown keys are retained for forward compatibility. */
+export function parseFenceArgs(value: string): FenceArgs {
+  const args: FenceArgs = {};
+  let index = 0;
+  while (index < value.length) {
+    while (/\s/.test(value[index] ?? "")) index += 1;
+    const keyMatch = value.slice(index).match(/^(\w+)=/);
+    if (!keyMatch) {
+      while (index < value.length && !/\s/.test(value[index])) index += 1;
+      continue;
+    }
+    const key = keyMatch[1];
+    index += keyMatch[0].length;
+    if (value[index] === '"') {
+      index += 1;
+      const end = value.indexOf('"', index);
+      if (end < 0) {
+        args[key] = value.slice(index);
+        break;
+      }
+      args[key] = value.slice(index, end);
+      index = end + 1;
+    } else {
+      const start = index;
+      while (index < value.length && !/\s/.test(value[index])) index += 1;
+      args[key] = value.slice(start, index);
+    }
+  }
+  return args;
 }
 
 /** Return the closing marker for a complete persisted output block. */
@@ -48,11 +84,7 @@ export function parseRunBlocks(content: string): RunBlock[] {
       const lang = canonicalLang(fenceMatch[1]);
       if (lang) {
         const lineStart = i;
-        const args = fenceMatch[2] ?? "";
-        const id = args.match(/id=(\S+)/)?.[1];
-        const format = args.match(/format=(\S+)/)?.[1];
-        const background = args.match(/background=(\S+)/)?.[1];
-        const context = args.match(/context=(\S+)/)?.[1];
+        const args = parseFenceArgs(fenceMatch[2] ?? "");
         const sourceLines: string[] = [];
         i++;
         while (i < lines.length && !lines[i].startsWith("```")) {
@@ -62,10 +94,11 @@ export function parseRunBlocks(content: string): RunBlock[] {
         blocks.push({
           language: lang,
           source: sourceLines.join("\n"),
-          id,
-          format,
-          background,
-          context,
+          id: args.id,
+          format: args.format,
+          background: args.background,
+          context: args.context,
+          ready: args.ready,
           lineStart,
           lineEnd: i,
         });

@@ -4,12 +4,17 @@
 
 ### Added
 - Code languages such as `format=json` now store plain text output as syntax-highlighted Markdown fences. The default remains `format=html`
+- Background cells can use `ready=port:<number>` or a literal output message, including a double-quoted message with spaces, so Run All waits until a service is usable. `notebook.readyTimeout` controls the 15-second default wait
 
 ### Changed
 - Background cells now tangle preceding, non-background cells of the same language into their fresh process by default. Use `{context=none}` for an isolated process
 - Background startup output reports how many preceding cells were included, and common temporary-file diagnostics point back to the relevant note line
 
 ### Fixed
+- Python background output is unbuffered, output readiness works across stream chunks without mixing stdout and stderr, and readiness failures stop the process with captured diagnostics
+- Readiness port checks reject ports already occupied on IPv4 loopback, and stopped processes fully release their port before `stop()` resolves
+- Concurrent starts reserve their background name before asynchronous port checks, preventing duplicate and orphaned processes
+- Stderr readiness ignores ANSI colour codes, matching the diagnostic text shown in notebook output
 - Reading View now matches Obsidian's trailing-newline and CRLF-normalised cell source when locating a background cell, so preceding context is not silently omitted
 - Carriage-return progress output from background processes is streamed, and unterminated stderr is force-flushed before its buffer can grow without bound
 - Bare Node traceback locations are mapped from temporary scripts back to their source note lines

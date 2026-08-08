@@ -5,6 +5,7 @@ export interface NotebookFrontmatter {
   format?: "html" | "image";
   media?: string;
   timeout?: number;
+  readyTimeout?: number;
   outputLimit?: number;
   markdownLinks?: boolean;
   cwd?: string;
@@ -21,6 +22,9 @@ export function readNotebookFrontmatter(app: App, file: TFile): NotebookFrontmat
     format: fm.format === "html" || fm.format === "image" ? fm.format : undefined,
     media: typeof fm.media === "string" ? fm.media : undefined,
     timeout: typeof fm.timeout === "number" ? fm.timeout : undefined,
+    readyTimeout: typeof fm.readyTimeout === "number" && fm.readyTimeout > 0
+      ? fm.readyTimeout
+      : undefined,
     outputLimit: typeof fm.outputLimit === "number" && fm.outputLimit > 0
       ? fm.outputLimit
       : undefined,

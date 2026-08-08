@@ -38,7 +38,7 @@ import {
   backgroundStartedMessage,
   buildBackgroundProgram,
 } from "./BackgroundProgram";
-import { parseRunBlocks } from "./CellParser";
+import { parseFenceArgs, parseRunBlocks } from "./CellParser";
 
 type AnyKernel = BaseKernel | ShellKernel;
 
@@ -140,6 +140,7 @@ export interface RunArgs {
   id?: string;
   format?: string;
   context?: string;
+  ready?: string;
   [key: string]: string | undefined;
 }
 
@@ -151,6 +152,7 @@ export interface RunnableCell {
   format?: string;
   background?: string;
   context?: string;
+  ready?: string;
 }
 
 interface RunCellOptions {
@@ -162,13 +164,7 @@ interface RunCellOptions {
 
 function parseRunArgs(openingLine: string): RunArgs {
   const match = openingLine.match(/\{([^}]*)\}/);
-  const args: RunArgs = {};
-  if (match) {
-    for (const m of match[1].matchAll(/(\w+)=(\S+)/g)) {
-      args[m[1]] = m[2];
-    }
-  }
-  return args;
+  return match ? parseFenceArgs(match[1]) : {};
 }
 
 function renderPlainCodeBlock(src: string, el: HTMLElement, language: string): HTMLPreElement {
@@ -259,6 +255,8 @@ export async function runCell(
           source: program.source,
           precedingCellCount: program.precedingCellCount,
           sourceMap: program.sourceMap,
+          ready: cell.ready,
+          readyTimeoutMs: fm.readyTimeout,
         };
         await context.background.start(request, onChunk, controller.signal);
         onChunk({
@@ -533,6 +531,7 @@ export async function processCodeBlock(
         format: runArgs.format,
         background: runArgs.background,
         context: runArgs.context,
+        ready: runArgs.ready,
         language,
         source: src,
         lineEnd: sectionInfo?.lineEnd ?? 0,

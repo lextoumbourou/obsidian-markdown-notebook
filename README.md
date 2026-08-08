@@ -94,14 +94,33 @@ The editor commands **Run all cells above cursor** and **Run cell and all cells 
 Add `background=<name>` to run a long-lived process without blocking the notebook:
 
 ````markdown
-```python {background=server}
+```python {background=server ready=port:8000}
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 
 HTTPServer(("127.0.0.1", 8000), SimpleHTTPRequestHandler).serve_forever()
 ```
 ````
 
-The cell runs in a fresh process. Its **Run** button becomes **Stop**, and Run All immediately continues to the next cell. The same syntax works with `javascript`, `bash`, and `r` fences. The process uses that language's configured executable and the note's configured working directory.
+The cell runs in a fresh process. Its **Run** button becomes **Stop**, and Run
+All continues when the process accepts connections on IPv4 loopback
+(`127.0.0.1`) port 8000. The same syntax works with `javascript`, `bash`, and
+`r` fences. The process uses that language's configured executable and the
+note's configured working directory.
+
+Use `ready=port:<number>` for a server. The port must be free before the
+process starts. For a process that does not listen on a port, wait for a
+literal stdout or stderr message instead. Double quotes allow spaces:
+
+````markdown
+```python {background=worker ready="Worker ready"}
+run_worker()
+```
+````
+
+Readiness output is matched literally, not as a regular expression. If a
+background cell has no `ready` argument, startup retains its 400 ms crash
+check and then continues as before. A readiness wait defaults to 15 seconds.
+Set `notebook.readyTimeout` in milliseconds to override it for the note.
 
 By default, a background cell tangles and replays preceding, non-background
 cells of the same language. This gives its fresh process the imports and
@@ -194,6 +213,7 @@ notebook:
   format: image       # default output format (html | image)
   media: attachments  # image save folder, relative to vault root
   timeout: 60000      # execution timeout in ms
+  readyTimeout: 15000 # background readiness timeout in ms
   outputLimit: 250    # maximum persisted output per cell in KB
   markdownLinks: true # use ![](path) instead of ![[file]] for images
   cwd: /              # optional: use vault root instead of the note folder

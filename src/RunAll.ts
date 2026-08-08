@@ -336,6 +336,8 @@ export async function runAll(
               source: program.source,
               precedingCellCount: program.precedingCellCount,
               sourceMap: program.sourceMap,
+              ready: block.ready,
+              readyTimeoutMs: fm.readyTimeout,
             }, (chunk) => { output.add(chunk); }, controller.signal);
             output.add({
               type: "stream",

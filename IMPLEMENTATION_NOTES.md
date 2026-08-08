@@ -11,14 +11,15 @@ must remain responsible for stopping every process it starts.
 ### Cell syntax
 
 ````markdown
-```python {background=calculator}
+```python {background=calculator ready=port:8000}
 serve()
 ```
 ````
 
 `background` is a note-scoped process name. Running the cell starts it. While
-it is running, the cell's Run button becomes a Stop button. Run All starts the
-process and immediately continues to the next cell.
+it is running, the cell's Run button becomes a Stop button. With `ready`, Run
+All waits for a TCP port or literal output before it continues. Without
+`ready`, it retains the original 400 ms startup grace.
 
 ### Design decisions
 
@@ -31,6 +32,17 @@ process and immediately continues to the next cell.
 - Let `{context=none}` opt out of tangling for a self-contained background
   process. `context=above` is the default.
 - Use the configured executable and working directory for each language.
+- Support `ready=port:<number>` on `127.0.0.1` and literal output readiness,
+  including double-quoted values with spaces. Readiness belongs to the process
+  manager, independently of source tangling.
+- Keep separate, bounded raw stdout and stderr readiness tails so interleaved
+  streams and display buffering cannot break a match across chunks.
+- Reject a port that is already open before launch as a helpful diagnostic,
+  while process exit and the readiness timeout remain authoritative.
+- Use `notebook.readyTimeout`, defaulting to 15 seconds, and stop a process
+  that never becomes ready.
+- Keep Python background output unbuffered with `-u` and
+  `PYTHONUNBUFFERED=1`.
 - Write cell source to a temporary file. This avoids shell quoting and makes
   the same mechanism work across all supported languages.
 - Keep processes attached to the plugin. Stop them when their cell is stopped,
@@ -54,6 +66,9 @@ process and immediately continues to the next cell.
 
 - [x] Parser tests cover named background cells in every supported language.
 - [x] Process-manager tests cover start, duplicate names, output, state and stop.
+- [x] Readiness tests cover delayed TCP binding, occupied ports, literal output
+      split across chunks, stream interleaving, timeout diagnostics and port
+      reuse after a complete stop.
 - [x] Run-button tests cover start and Stop-button behaviour.
 - [x] Run All tests prove that later cells execute while a background cell is
       still running.

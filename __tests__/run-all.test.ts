@@ -195,6 +195,22 @@ describe('parseRunBlocks', () => {
     ]);
   });
 
+  it('parses quoted fence values with spaces without changing existing args', () => {
+    const blocks = parseRunBlocks([
+      '```python {id=api format=json background=server context=none ready="Serving on port 8000" future=value}',
+      'serve()',
+      '```',
+    ].join('\n'));
+
+    expect(blocks[0]).toMatchObject({
+      id: 'api',
+      format: 'json',
+      background: 'server',
+      context: 'none',
+      ready: 'Serving on port 8000',
+    });
+  });
+
   it('tangles preceding same-language cells for a background process', () => {
     const blocks = parseRunBlocks([
       '```python', 'from app import server', '```',
@@ -355,7 +371,7 @@ describe('runAll', () => {
     const memory = memoryNotebook([
       '```python', 'setup()', '```',
       '',
-      '```python {background=server}', 'serve()', '```',
+      '```python {background=server ready=port:8765}', 'serve()', '```',
       '',
       '```python', 'print("client")', '```',
     ].join('\n'));
@@ -393,6 +409,7 @@ describe('runAll', () => {
       expect.objectContaining({
         source: 'setup()\n\nserve()',
         precedingCellCount: 1,
+        ready: 'port:8765',
       }),
       expect.any(Function),
       expect.any(AbortSignal),
@@ -406,6 +423,47 @@ describe('runAll', () => {
     expect(memory.content()).toContain(
       'Background process &quot;server&quot; started with 1 preceding python cell.',
     );
+  });
+
+  it('does not execute the next cell until background readiness resolves', async () => {
+    const memory = memoryNotebook([
+      '```python {background=server ready=port:8765}', 'serve()', '```', '',
+      '```python', 'call_server()', '```',
+    ].join('\n'));
+    let markReady!: () => void;
+    const ready = new Promise<void>((resolve) => { markReady = resolve; });
+    const events: string[] = [];
+    let running = false;
+    const background = {
+      start: jest.fn(async () => {
+        events.push('starting');
+        await ready;
+        running = true;
+        events.push('ready');
+      }),
+      stop: jest.fn(async () => { running = false; return true; }),
+      isRunning: jest.fn(() => running),
+    };
+    const kernel = {
+      executionCount: 0,
+      execute: jest.fn(async () => { events.push('client'); }),
+    };
+
+    const run = runAll(
+      memory.app as never,
+      memory.file,
+      (() => kernel) as never,
+      DEFAULT_SETTINGS,
+      {},
+      undefined,
+      background,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(events).toEqual(['starting']);
+
+    markReady();
+    await run;
+    expect(events).toEqual(['starting', 'ready', 'client']);
   });
 
   it('continues after a failed cell when stop on first error is disabled', async () => {

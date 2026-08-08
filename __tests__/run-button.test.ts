@@ -283,7 +283,7 @@ describe('Run button', () => {
     const source = 'serve()\n';
     let markdown = [
       '```python', 'setup()', '```', '',
-      '```python {background=server}', 'serve()', '```',
+      '```python {background=server ready="Serving on port 8000"}', 'serve()', '```',
     ].join('\n');
     const file = new TFile();
     file.path = 'note.md';
@@ -331,6 +331,7 @@ describe('Run button', () => {
       expect.objectContaining({
         source: 'setup()\n\nserve()',
         precedingCellCount: 1,
+        ready: 'Serving on port 8000',
       }),
       expect.any(Function),
       expect.any(AbortSignal),
