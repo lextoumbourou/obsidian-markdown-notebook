@@ -1,9 +1,10 @@
-export const SUPPORTED_LANGUAGES = ["python", "javascript", "bash", "r"] as const;
+export const SUPPORTED_LANGUAGES = ["python", "javascript", "bash", "r", "sql"] as const;
 
 export const LANG_ALIASES: Record<string, string> = {
   js: "javascript",
   sh: "bash",
   shell: "bash",
+  duckdb: "sql",
 };
 
 /** Returns the canonical language name, or null if unsupported. */

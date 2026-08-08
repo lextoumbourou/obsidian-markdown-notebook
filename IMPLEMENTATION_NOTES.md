@@ -75,3 +75,35 @@ All waits for a TCP port or literal output before it continues. Without
 - [x] Tangling tests cover same-language context, interleaved languages,
       earlier background cells, `context=none` and diagnostic line mapping.
 - [x] Lint, unit tests and production build pass.
+
+## DuckDB SQL cells
+
+### Design
+
+- Treat `sql` as the canonical language and `duckdb` as an alias.
+- Keep one in-memory DuckDB CLI process per note and runtime configuration.
+  Temporary tables, attached databases and macros therefore persist between
+  cells without creating an untracked database file.
+- Start the CLI with `-batch`, an empty `-init` file and HTML output. The empty
+  init file prevents a user's `~/.duckdbrc` from changing notebook behavior.
+- Append a unique `.print` completion marker to each cell. Query output before
+  the marker becomes a rich HTML table.
+- Collect stderr until completion. SQL errors reject the cell but keep the CLI
+  session alive for later cells. After the stdout completion marker, allow a
+  50 ms quiet window for stderr because the two process pipes have independent
+  event delivery.
+- Serialize cells through the same queue contract as the other kernels.
+  Cancellation sends `SIGINT`, drains output through the cell marker, and
+  restarts the kernel only when it cannot recover.
+- Use the note working directory so DuckDB functions such as `read_csv_auto`,
+  `read_json_auto` and `read_parquet` resolve relative paths consistently.
+- Support the global DuckDB executable setting, `notebook.duckdb`, and the
+  `nb-run --duckdb` override.
+
+### Verification
+
+- [x] Real DuckDB tests cover HTML results, session state, SQL error recovery,
+      timeout recovery and note-relative CSV queries when the CLI is installed.
+- [x] Parser and configuration tests cover `sql`, the `duckdb` alias and
+      executable overrides.
+- [x] The example vault contains a five-cell end-to-end SQL notebook.

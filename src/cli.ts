@@ -36,6 +36,7 @@ import { SubprocessKernel } from "./kernels/SubprocessKernel";
 import { NodeKernel } from "./kernels/NodeKernel";
 import { ShellKernel } from "./kernels/ShellKernel";
 import { RKernel } from "./kernels/RKernel";
+import { DuckDBKernel } from "./kernels/DuckDBKernel";
 import type { BaseKernel } from "./kernels/BaseKernel";
 import { resolveExecutable } from "./NotebookKernelConfig";
 import { BackgroundProcessManager } from "./BackgroundProcessManager";
@@ -49,7 +50,7 @@ if (!globalThis.crypto) {
   (globalThis as { crypto?: unknown }).crypto = webcrypto;
 }
 
-type AnyKernel = BaseKernel | ShellKernel;
+type AnyKernel = BaseKernel | ShellKernel | DuckDBKernel;
 
 export interface CliOptions {
   file: string;
@@ -62,7 +63,7 @@ export interface CliOptions {
   outputLimit?: number;
   media?: string;
   vaultRoot?: string;
-  paths: { python: string; node: string; shell: string; r: string };
+  paths: { python: string; node: string; shell: string; r: string; duckdb: string };
   pathOverrides: Partial<CliOptions["paths"]>;
 }
 
@@ -88,6 +89,7 @@ Options:
   --node <path>      Node executable (default: node)
   --shell <path>     Shell executable (default: bash)
   --r <path>         R executable (default: R)
+  --duckdb <path>    DuckDB executable (default: duckdb)
   -h, --help         Show this help
 
 Cell output streams to stdout/stderr as it runs; status lines go to stderr.
@@ -99,7 +101,7 @@ export function parseArgs(argv: string[]): CliOptions | { error: string } | { he
     list: false,
     only: false,
     write: false,
-    paths: { python: "python3", node: "node", shell: "bash", r: "R" },
+    paths: { python: "python3", node: "node", shell: "bash", r: "R", duckdb: "duckdb" },
     pathOverrides: {},
   };
   for (let i = 0; i < argv.length; i++) {
@@ -148,7 +150,7 @@ export function parseArgs(argv: string[]): CliOptions | { error: string } | { he
         opts.vaultRoot = v;
         break;
       }
-      case "--python": case "--node": case "--shell": case "--r": {
+      case "--python": case "--node": case "--shell": case "--r": case "--duckdb": {
         const v = next();
         if (v === null) return { error: `${a} requires a value` };
         const key = a.slice(2) as keyof CliOptions["paths"];
@@ -178,6 +180,7 @@ export interface NotebookFm {
   node?: string;
   shell?: string;
   r?: string;
+  duckdb?: string;
 }
 
 /** Minimal parser for the `notebook:` frontmatter block (flat keys only). */
@@ -208,7 +211,10 @@ export function parseNotebookFrontmatter(content: string): NotebookFm {
     else if (key === "outputLimit" && Number(val) > 0) fm.outputLimit = Number(val);
     else if (key === "markdownLinks") fm.markdownLinks = val === "true";
     else if (key === "cwd") fm.cwd = val;
-    else if (key === "python" || key === "node" || key === "shell" || key === "r") fm[key] = val;
+    else if (
+      key === "python" || key === "node" || key === "shell"
+      || key === "r" || key === "duckdb"
+    ) fm[key] = val;
   }
   return fm;
 }
@@ -275,6 +281,7 @@ function createKernel(lang: string, paths: CliOptions["paths"], cwd: string): An
     case "python":     return new SubprocessKernel(paths.python, cwd);
     case "javascript": return new NodeKernel(paths.node, cwd);
     case "r":          return new RKernel(paths.r, cwd);
+    case "sql":        return new DuckDBKernel(paths.duckdb, cwd);
     default:           return new ShellKernel(paths.shell, cwd);
   }
 }
@@ -404,6 +411,7 @@ async function main(): Promise<void> {
     node: cliExecutable("node", opts.paths.node),
     shell: cliExecutable("shell", opts.paths.shell),
     r: cliExecutable("r", opts.paths.r),
+    duckdb: cliExecutable("duckdb", opts.paths.duckdb),
   };
 
   const kernels = new Map<string, AnyKernel>();
@@ -422,6 +430,7 @@ async function main(): Promise<void> {
       case "javascript": return paths.node;
       case "bash": return paths.shell;
       case "r": return paths.r;
+      case "sql": return paths.duckdb;
       default: return paths.shell;
     }
   };

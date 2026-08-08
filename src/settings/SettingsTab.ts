@@ -70,6 +70,7 @@ export class SettingsTab extends PluginSettingTab {
     this.addPathSetting(containerEl, "Node.js", "node", "nodePath", false);
     this.addPathSetting(containerEl, "Shell", "bash", "shellPath", false);
     this.addPathSetting(containerEl, "R", "R", "rPath", false);
+    this.addPathSetting(containerEl, "DuckDB", "duckdb", "duckdbPath", true);
 
     // ── Output ───────────────────────────────────────────────────────────────
 
@@ -149,7 +150,7 @@ export class SettingsTab extends PluginSettingTab {
     containerEl: HTMLElement,
     label: string,
     placeholder: string,
-    key: "pythonPath" | "nodePath" | "shellPath" | "rPath",
+    key: "pythonPath" | "nodePath" | "shellPath" | "rPath" | "duckdbPath",
     restartOnChange: boolean
   ): void {
     new Setting(containerEl)

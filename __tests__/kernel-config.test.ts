@@ -57,6 +57,23 @@ describe("notebook kernel configuration", () => {
     expect(config.executable).toBe(path.resolve("/vault/tools/python"));
   });
 
+  it("resolves the DuckDB executable from note frontmatter", () => {
+    const file = new TFile();
+    file.path = "projects/demo/Notebook.md";
+    Object.assign(file, { parent: { path: "projects/demo" } });
+    const app = { vault: { adapter: { getBasePath: () => "/vault" } } };
+
+    const config = resolveNotebookKernelConfig(
+      app as never,
+      file,
+      "sql",
+      DEFAULT_SETTINGS,
+      { duckdb: "./bin/duckdb" },
+    );
+
+    expect(config.executable).toBe(path.resolve("/vault/projects/demo/bin/duckdb"));
+  });
+
   it("includes the note and resolved configuration in the session key", () => {
     const base = { language: "python", executable: "python3", cwd: "/vault/a" };
     expect(notebookKernelSessionKey({ ...base, notePath: "a.md" }))

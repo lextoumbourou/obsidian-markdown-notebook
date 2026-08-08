@@ -47,8 +47,9 @@ Comment markers are invisible in all standard Markdown renderers — including P
 - **Managed background cells** — start and stop long-running servers from Python, JavaScript, Bash, or R cells without blocking later cells
 - **Clear outputs** — remove one cell's persisted output or every output block in the active note
 - **Notebook-scoped kernel state** — variables are shared between cells in one note but isolated from other notes
+- **DuckDB SQL cells**: query CSV, JSON, and Parquet files directly, with temporary tables and macros shared across cells
 - **Predictable relative paths** — every kernel starts in the note's folder, so `data.csv` and other relative paths work naturally
-- **Persistent failure diagnostics** — Python, Node.js, and R exceptions plus non-zero shell exits are marked as failed, with escaped tracebacks, stderr, and preceding output stored in the note
+- **Persistent failure diagnostics**: Python, Node.js, R, and DuckDB errors plus non-zero shell exits are marked as failed, with escaped diagnostics and preceding output stored in the note
 - **Output size protection** — persisted output is capped at 100 KB per cell by default, with a visible truncation marker instead of an oversized note
 - **Robust failure handling** — distinct ⏱ timeout state, runaway cells are interrupted on timeout, and output blocks left mid-run by a crash are repaired on next open
 - **Headless runner** — the `nb-run` CLI executes cells and updates outputs without Obsidian (publish pipelines, CI)
@@ -62,6 +63,7 @@ Comment markers are invisible in all standard Markdown renderers — including P
   - Node.js 14+ (`node` on PATH)
   - Bash (`bash` on PATH)
   - R 4.0+ (`R` on PATH)
+  - DuckDB CLI (`duckdb` on PATH)
 
 Optional but recommended for rich output:
 
@@ -78,6 +80,29 @@ Optional but recommended for rich output:
 | `javascript` | `js` | Persistent Node.js subprocess |
 | `bash` | `sh`, `shell` | Fresh `bash -c` per cell |
 | `r` | — | Persistent R subprocess |
+| `sql` | `duckdb` | Persistent in-memory DuckDB CLI session |
+
+### DuckDB SQL
+
+Install the DuckDB CLI (`brew install duckdb` on macOS), then use `sql` or
+`duckdb` fences. Each note gets its own in-memory DuckDB session, so temporary
+tables, attached databases and macros remain available to later cells:
+
+````markdown
+```sql
+CREATE TEMP TABLE totals AS SELECT 42 AS answer;
+```
+
+```sql
+SELECT * FROM totals;
+```
+````
+
+Query results render as HTML tables. Relative CSV, JSON, Parquet and database
+paths resolve from the note's working directory. Use one final query per cell
+for the clearest table output. SQL errors fail the cell without discarding the
+session. Configure the executable globally with **DuckDB path**, per note with
+`notebook.duckdb`, or in `nb-run` with `--duckdb`.
 
 ### Running cells
 
@@ -218,6 +243,7 @@ notebook:
   markdownLinks: true # use ![](path) instead of ![[file]] for images
   cwd: /              # optional: use vault root instead of the note folder
   python: .venv/bin/python # optional per-note Python executable
+  duckdb: duckdb       # optional per-note DuckDB CLI executable
 ---
 ```
 
@@ -229,9 +255,9 @@ Cell-level args override frontmatter, which overrides plugin settings:
 
 Native PNGs produced by a successful `format=image` cell are saved as attachments and only their small link is stored in the note, so the attachment data is not counted against this Markdown limit. If that cell fails or times out after producing a plot, the failure block retains capped text diagnostics but does not embed the plot.
 
-By default, Python, Node.js, Bash, and R execute with the note's folder as their working directory. Set `cwd: /` (or `cwd: vault`) to use the vault root. Any other relative `cwd` is resolved from the note's folder; absolute filesystem paths are also supported.
+By default, Python, Node.js, Bash, R and DuckDB execute with the note's folder as their working directory. Set `cwd: /` (or `cwd: vault`) to use the vault root. Any other relative `cwd` is resolved from the note's folder; absolute filesystem paths are also supported.
 
-The `python`, `node`, `shell`, and `r` frontmatter keys override their corresponding global executable settings for that note. Frontmatter executable paths containing a directory component, such as `.venv/bin/python`, are resolved from the note's folder. Relative paths in the global executable settings are resolved from the vault root, while plain command names such as `python3` continue to use `PATH`.
+The `python`, `node`, `shell`, `r`, and `duckdb` frontmatter keys override their corresponding global executable settings for that note. Frontmatter executable paths containing a directory component, such as `.venv/bin/python`, are resolved from the note's folder. Relative paths in the global executable settings are resolved from the vault root, while plain command names such as `python3` continue to use `PATH`.
 
 Each note has its own persistent language kernels. State is shared between cells in that note, while variables, working directories, execution counts, and per-note environments do not leak into other notes. A note's kernels are shut down when its last Markdown tab or split closes, or when the note is renamed or deleted; reopening it starts a fresh session.
 
@@ -262,6 +288,7 @@ Clear commands modify only the note's `nb-output` blocks. Saved PNG attachments 
 | Node.js path | `node` | Path to the Node.js executable |
 | Shell path | `bash` | Path to the shell interpreter |
 | R path | `R` | Path to the R executable |
+| DuckDB path | `duckdb` | Path to the DuckDB CLI executable |
 | Default output format | `html` | Format used when no `format=` arg is set (`html` or `image`) |
 | Media folder | *(empty)* | Vault-relative folder for saved images. Empty = save next to the note. |
 | Markdown image links | off | Use `![](path)` instead of `![[file]]` for saved images |
@@ -348,7 +375,7 @@ node cli.js Note.md --output-limit 250  # cap persisted cell output at 250 KB
 node cli.js Note.md --vault-root Vault  # explicit root for notebook.cwd: /
 ```
 
-Because each invocation starts fresh kernels, targeting a cell runs every cell *up to and including* it by default (Jupyter's "run up to here"), so earlier cells' variables are available; `--only` skips the prelude. Interpreter paths default to `python3`/`node`/`bash`/`R` and can be overridden with `--python`, `--node`, `--shell`, `--r`. Frontmatter `notebook:` defaults, including `cwd`, `outputLimit`, and per-language executable paths, are respected.
+Because each invocation starts fresh kernels, targeting a cell runs every cell *up to and including* it by default (Jupyter's "run up to here"), so earlier cells' variables are available; `--only` skips the prelude. Interpreter paths default to `python3`/`node`/`bash`/`R`/`duckdb` and can be overridden with `--python`, `--node`, `--shell`, `--r`, or `--duckdb`. Frontmatter `notebook:` defaults, including `cwd`, `outputLimit`, and per-language executable paths, are respected.
 
 The CLI uses the same `cwd` rules as the plugin. For `cwd: /` or `cwd: vault`, it searches upward from the note for the nearest `.obsidian` directory. If the note is outside a vault copy, pass `--vault-root <dir>`; the CLI fails clearly rather than interpreting `/` as the filesystem root. Relative frontmatter executable paths resolve from the note, while relative command-line executable paths resolve from the shell's current directory. The output limit applies to blocks written with `--write`; live terminal output continues streaming in full.
 

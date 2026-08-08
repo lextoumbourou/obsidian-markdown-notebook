@@ -5,6 +5,7 @@
 ### Added
 - Code languages such as `format=json` now store plain text output as syntax-highlighted Markdown fences. The default remains `format=html`
 - Background cells can use `ready=port:<number>` or a literal output message, including a double-quoted message with spaces, so Run All waits until a service is usable. `notebook.readyTimeout` controls the 15-second default wait
+- Persistent DuckDB sessions for `sql` and `duckdb` fences, with HTML query tables, shared temporary tables and macros, relative file queries, plugin and CLI executable configuration, and `nb-run` support
 
 ### Changed
 - Background cells now tangle preceding, non-background cells of the same language into their fresh process by default. Use `{context=none}` for an isolated process

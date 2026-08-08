@@ -27,6 +27,7 @@ import { OutputLimiter } from "./output/OutputLimiter";
 import { KernelCancelledError, KernelExecutionError, KernelTimeoutError } from "./kernels/BaseKernel";
 import type { BaseKernel } from "./kernels/BaseKernel";
 import type { ShellKernel } from "./kernels/ShellKernel";
+import type { DuckDBKernel } from "./kernels/DuckDBKernel";
 import type { PluginSettings } from "./settings/Settings";
 import { readNotebookFrontmatter, NotebookFrontmatter } from "./NotebookFrontmatter";
 import { scheduleRunAllToolbarRender } from "./RunAllToolbar";
@@ -40,7 +41,7 @@ import {
 } from "./BackgroundProgram";
 import { parseFenceArgs, parseRunBlocks } from "./CellParser";
 
-type AnyKernel = BaseKernel | ShellKernel;
+type AnyKernel = BaseKernel | ShellKernel | DuckDBKernel;
 
 const RUNNING_HTML = `<div class="nb-status-running"><span class="nb-status-spinner"></span>Running...</div>`;
 

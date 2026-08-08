@@ -5,6 +5,7 @@ export interface PluginSettings {
   nodePath: string;
   shellPath: string;
   rPath: string;
+  duckdbPath: string;
   executionTimeout: number;
   outputLimitKb: number;
   stopOnFirstError: boolean;
@@ -19,6 +20,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   nodePath: "node",
   shellPath: "bash",
   rPath: "R",
+  duckdbPath: "duckdb",
   executionTimeout: 30000,
   outputLimitKb: DEFAULT_OUTPUT_LIMIT_KB,
   stopOnFirstError: true,

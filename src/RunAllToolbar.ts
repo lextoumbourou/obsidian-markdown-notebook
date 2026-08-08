@@ -9,10 +9,11 @@ import {
 } from "./RunAll";
 import type { BaseKernel } from "./kernels/BaseKernel";
 import type { ShellKernel } from "./kernels/ShellKernel";
+import type { DuckDBKernel } from "./kernels/DuckDBKernel";
 import type { PluginSettings } from "./settings/Settings";
 import type { BackgroundExecutionContext } from "./BackgroundProcessManager";
 
-type AnyKernel = BaseKernel | ShellKernel;
+type AnyKernel = BaseKernel | ShellKernel | DuckDBKernel;
 
 export interface RunAllToolbarContext {
   app: App;

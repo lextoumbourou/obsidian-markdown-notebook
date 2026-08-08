@@ -48,9 +48,13 @@ describe('parseArgs', () => {
   });
 
   it('parses interpreter path overrides', () => {
-    const opts = ok(['Note.md', '--python', '/venv/bin/python3', '--r', '/usr/local/bin/R']);
+    const opts = ok([
+      'Note.md', '--python', '/venv/bin/python3', '--r', '/usr/local/bin/R',
+      '--duckdb', '/usr/local/bin/duckdb',
+    ]);
     expect(opts.paths.python).toBe('/venv/bin/python3');
     expect(opts.paths.r).toBe('/usr/local/bin/R');
+    expect(opts.paths.duckdb).toBe('/usr/local/bin/duckdb');
   });
 
   it('parses an explicit vault root', () => {
@@ -124,6 +128,7 @@ describe('parseNotebookFrontmatter', () => {
       '  markdownLinks: true',
       '  cwd: data',
       '  python: .venv/bin/python',
+      '  duckdb: tools/duckdb',
       '---',
       '# Body',
     ].join('\n');
@@ -136,6 +141,7 @@ describe('parseNotebookFrontmatter', () => {
       markdownLinks: true,
       cwd: 'data',
       python: '.venv/bin/python',
+      duckdb: 'tools/duckdb',
     });
   });
 

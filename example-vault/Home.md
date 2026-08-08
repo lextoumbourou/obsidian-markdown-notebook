@@ -7,7 +7,7 @@ A manual smoke-test vault for the plugin. One note per language, plus notes for 
 1. `npm run build` in the repo root (the plugin in this vault is symlinked to the repo's `main.js`, `manifest.json`, and `styles.css`)
 2. Open this folder as a vault in Obsidian (**Open folder as vault**)
 3. When prompted, trust the vault and enable community plugins
-4. Requirements: `python3` (with `pandas` + `matplotlib`), `node`, `bash`, and `R` (with `knitr`, `jsonlite`, `base64enc`) on PATH
+4. Requirements: `python3` (with `pandas` + `matplotlib`), `node`, `bash`, `duckdb`, and `R` (with `knitr`, `jsonlite`, `base64enc`) on PATH
 
 ## Test notes
 
@@ -15,6 +15,7 @@ A manual smoke-test vault for the plugin. One note per language, plus notes for 
 - [R](R.md) — plain output, state, kable table, plots, image format, messages, errors
 - [Bash](Bash.md) — plain output, pipelines, stderr, fresh-process-per-cell semantics, aliases
 - [JavaScript](JavaScript.md) — console output, object display, state, `js` alias, errors
+- [DuckDB SQL](DuckDB%20SQL.md): HTML query tables, persistent temporary tables and macros, `duckdb` alias, relative CSV queries
 - [Timeouts](Timeouts.md) — per-note timeout frontmatter, ⏱ timeout blocks, recovery after timeout
 - [Frontmatter Defaults](Frontmatter%20Defaults.md) — note-level `notebook:` defaults (format, media folder, markdown links)
 - [Background Processes](Background%20Processes.md) — start a Python server, call it from a later cell, and stop it from the notebook

@@ -13,6 +13,7 @@ export interface NotebookFrontmatter {
   node?: string;
   shell?: string;
   r?: string;
+  duckdb?: string;
 }
 
 export function readNotebookFrontmatter(app: App, file: TFile): NotebookFrontmatter {
@@ -34,5 +35,6 @@ export function readNotebookFrontmatter(app: App, file: TFile): NotebookFrontmat
     node: typeof fm.node === "string" ? fm.node : undefined,
     shell: typeof fm.shell === "string" ? fm.shell : undefined,
     r: typeof fm.r === "string" ? fm.r : undefined,
+    duckdb: typeof fm.duckdb === "string" ? fm.duckdb : undefined,
   };
 }

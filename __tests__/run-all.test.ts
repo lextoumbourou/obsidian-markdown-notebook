@@ -178,6 +178,14 @@ describe('parseRunBlocks', () => {
     expect(blocks[1].language).toBe('r');
   });
 
+  it('parses sql and duckdb fences as DuckDB cells', () => {
+    const blocks = parseRunBlocks([
+      '```sql', 'SELECT 1;', '```',
+      '```duckdb', 'SELECT 2;', '```',
+    ].join('\n'));
+    expect(blocks.map((block) => block.language)).toEqual(['sql', 'sql']);
+  });
+
   it('parses named background cells for every supported language', () => {
     const content = [
       '```python {background=python-server}', 'serve()', '```',

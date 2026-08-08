@@ -5,6 +5,7 @@ import { SubprocessKernel } from "./kernels/SubprocessKernel";
 import { NodeKernel } from "./kernels/NodeKernel";
 import { ShellKernel } from "./kernels/ShellKernel";
 import { RKernel } from "./kernels/RKernel";
+import { DuckDBKernel } from "./kernels/DuckDBKernel";
 import { BaseKernel } from "./kernels/BaseKernel";
 import {
   processCodeBlock,
@@ -38,7 +39,7 @@ import {
 } from "./BackgroundProcessManager";
 import type { OutputChunk } from "./output/MimeRenderer";
 
-type AnyKernel = BaseKernel | ShellKernel;
+type AnyKernel = BaseKernel | ShellKernel | DuckDBKernel;
 
 interface KernelSession {
   config: NotebookKernelConfig;
@@ -400,15 +401,19 @@ export default class MarkdownNotebookPlugin extends Plugin {
       case "javascript": return new NodeKernel(config.executable, config.cwd);
       case "bash":       return new ShellKernel(config.executable, config.cwd);
       case "r":          return new RKernel(config.executable, config.cwd);
+      case "sql":        return new DuckDBKernel(config.executable, config.cwd);
       default:            return new ShellKernel(config.executable, config.cwd);
     }
   }
 
   /** Restart one kernel (by settings key) or all kernels. */
-  restartKernel(key?: "pythonPath" | "nodePath" | "shellPath" | "rPath"): void {
+  restartKernel(
+    key?: "pythonPath" | "nodePath" | "shellPath" | "rPath" | "duckdbPath",
+  ): void {
     const langForKey: Record<string, string> = {
       pythonPath: "python", nodePath: "javascript",
       shellPath: "bash",    rPath: "r",
+      duckdbPath: "sql",
     };
 
     const targetLanguage = key ? langForKey[key] : undefined;

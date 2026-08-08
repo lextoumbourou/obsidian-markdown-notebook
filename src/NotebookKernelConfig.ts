@@ -10,13 +10,14 @@ export interface NotebookKernelConfig {
   cwd: string;
 }
 
-type ExecutableKey = "python" | "node" | "shell" | "r";
+type ExecutableKey = "python" | "node" | "shell" | "r" | "duckdb";
 
 const EXECUTABLE_KEYS: Record<string, ExecutableKey> = {
   python: "python",
   javascript: "node",
   bash: "shell",
   r: "r",
+  sql: "duckdb",
 };
 
 const SETTING_KEYS: Record<ExecutableKey, keyof PluginSettings> = {
@@ -24,6 +25,7 @@ const SETTING_KEYS: Record<ExecutableKey, keyof PluginSettings> = {
   node: "nodePath",
   shell: "shellPath",
   r: "rPath",
+  duckdb: "duckdbPath",
 };
 
 function looksLikePath(value: string): boolean {
