@@ -2,8 +2,17 @@ import { ChildProcessWithoutNullStreams, spawn } from "child_process";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { KernelCancelledError, kernelEnv, stripAnsi } from "./kernels/BaseKernel";
+import {
+  KernelCancelledError,
+  KernelExecutionError,
+  kernelEnv,
+  stripAnsi,
+} from "./kernels/BaseKernel";
 import type { OutputChunk } from "./output/MimeRenderer";
+import {
+  mapBackgroundDiagnostic,
+  type BackgroundSourceMapEntry,
+} from "./BackgroundProgram";
 
 const STARTUP_GRACE_MS = 400;
 const STOP_GRACE_MS = 1000;
@@ -15,6 +24,8 @@ export interface BackgroundCellRequest {
   name: string;
   language: string;
   source: string;
+  precedingCellCount?: number;
+  sourceMap?: BackgroundSourceMapEntry[];
 }
 
 export interface BackgroundProcessSpec extends BackgroundCellRequest {
@@ -143,14 +154,45 @@ export class BackgroundProcessManager {
       managed.capturedOutput = (managed.capturedOutput + text).slice(-MAX_CAPTURED_OUTPUT);
     };
     proc.stdout.on("data", (data: Buffer) => {
+      if (managed.stopping) return;
       const text = data.toString();
       capture(text);
       onChunk({ type: "stream", stream: "stdout", text });
     });
-    proc.stderr.on("data", (data: Buffer) => {
-      const text = stripAnsi(data.toString());
+    let stderrBuffer = "";
+    const emitStderr = (raw: string) => {
+      const text = mapBackgroundDiagnostic(
+        raw,
+        tempFile,
+        spec.sourcePath,
+        name,
+        spec.sourceMap ?? [],
+      );
       capture(text);
       if (text) onChunk({ type: "error", text });
+    };
+    const flushStderr = () => {
+      if (!stderrBuffer) return;
+      if (managed.stopping) {
+        stderrBuffer = "";
+        return;
+      }
+      emitStderr(stderrBuffer);
+      stderrBuffer = "";
+    };
+    proc.stderr.on("data", (data: Buffer) => {
+      if (managed.stopping) return;
+      stderrBuffer += stripAnsi(data.toString());
+      const completeThrough = Math.max(
+        stderrBuffer.lastIndexOf("\n"),
+        stderrBuffer.lastIndexOf("\r"),
+      );
+      if (completeThrough >= 0) {
+        const complete = stderrBuffer.slice(0, completeThrough + 1);
+        stderrBuffer = stderrBuffer.slice(completeThrough + 1);
+        emitStderr(complete);
+      }
+      if (stderrBuffer.length >= MAX_CAPTURED_OUTPUT) flushStderr();
     });
 
     let startupSettled = false;
@@ -164,21 +206,22 @@ export class BackgroundProcessManager {
       resolveClosed();
     };
     proc.once("error", (error) => {
+      flushStderr();
       cleanup();
       if (!startupSettled) rejectStartup?.(error);
     });
     proc.once("close", (code, signalName) => {
+      flushStderr();
       cleanup();
       if (!startupSettled) {
         if (managed.stopping) {
           rejectStartup?.(new KernelCancelledError());
         } else {
           const detail = managed.capturedOutput.trim();
-          rejectStartup?.(new Error(
-            detail || `Background process "${name}" exited with ${
+          const message = detail || `Background process "${name}" exited with ${
               code === null ? `signal ${signalName ?? "unknown"}` : `code ${code}`
-            }`,
-          ));
+            }`;
+          rejectStartup?.(new KernelExecutionError(message, message));
         }
       }
     });

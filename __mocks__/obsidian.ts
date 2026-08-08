@@ -71,6 +71,7 @@ export class Vault {
   on = jest.fn(() => ({ off: jest.fn() }));
   process = jest.fn();
   read = jest.fn();
+  cachedRead = jest.fn();
   modify = jest.fn();
   createBinary = jest.fn();
   modifyBinary = jest.fn();

@@ -39,6 +39,10 @@ import { RKernel } from "./kernels/RKernel";
 import type { BaseKernel } from "./kernels/BaseKernel";
 import { resolveExecutable } from "./NotebookKernelConfig";
 import { BackgroundProcessManager } from "./BackgroundProcessManager";
+import {
+  backgroundStartedMessage,
+  buildBackgroundProgram,
+} from "./BackgroundProgram";
 
 // hashCodeFence uses the Web Crypto API; expose it on Node < 19
 if (!globalThis.crypto) {
@@ -447,18 +451,21 @@ async function main(): Promise<void> {
         }
       };
       if (block.background) {
+        const program = buildBackgroundProgram(blocks, block);
         await backgrounds.start({
           sourcePath: filePath,
           name: block.background,
           language: block.language,
-          source: block.source,
+          source: program.source,
+          precedingCellCount: program.precedingCellCount,
+          sourceMap: program.sourceMap,
           executable: backgroundExecutable(block.language),
           cwd,
         }, onChunk);
         onChunk({
           type: "stream",
           stream: "stdout",
-          text: `Background process "${block.background}" started.\n`,
+          text: backgroundStartedMessage(block.background, block.language, program),
         });
       } else {
         await getKernel(block.language).execute(
@@ -482,7 +489,12 @@ async function main(): Promise<void> {
         }
       }
     }
-    results.push({ block, chunks, nativeImageData: output.nativeImageData, failure });
+    results.push({
+      block,
+      chunks: [...chunks],
+      nativeImageData: output.nativeImageData,
+      failure,
+    });
   }
   await backgrounds.stopAll();
   for (const k of kernels.values()) k.stop();

@@ -280,8 +280,11 @@ describe('Run button', () => {
   });
 
   it('starts and stops a named background cell from the same button', async () => {
-    const source = 'serve()';
-    let markdown = `\`\`\`python {background=server}\n${source}\n\`\`\``;
+    const source = 'serve()\n';
+    let markdown = [
+      '```python', 'setup()', '```', '',
+      '```python {background=server}', 'serve()', '```',
+    ].join('\n');
     const file = new TFile();
     file.path = 'note.md';
     Object.assign(file, { extension: 'md', parent: { path: '' } });
@@ -290,6 +293,7 @@ describe('Run button', () => {
       workspace: { getLeavesOfType: jest.fn(() => []) },
       vault: {
         getAbstractFileByPath: jest.fn(() => file),
+        cachedRead: jest.fn(async () => markdown),
         process: jest.fn(async (_file: TFile, transform: (raw: string) => string) => {
           markdown = transform(markdown);
         }),
@@ -313,7 +317,7 @@ describe('Run button', () => {
     };
     const ctx = {
       sourcePath: file.path,
-      getSectionInfo: () => ({ text: markdown, lineStart: 0, lineEnd: 2 }),
+      getSectionInfo: () => ({ text: markdown, lineStart: 4, lineEnd: 6 }),
     } as unknown as MarkdownPostProcessorContext;
     Object.assign(globalThis, { window: {}, HTMLPreElement: FakeElement });
     const root = new FakeElement();
@@ -323,9 +327,19 @@ describe('Run button', () => {
     await button.click();
 
     expect(background.start).toHaveBeenCalledTimes(1);
+    expect(background.start).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: 'setup()\n\nserve()',
+        precedingCellCount: 1,
+      }),
+      expect.any(Function),
+      expect.any(AbortSignal),
+    );
     expect(context.acquireKernel).not.toHaveBeenCalled();
     expect(button.textContent).toBe('■ Stop');
-    expect(markdown).toContain('Background process &quot;server&quot; started.');
+    expect(markdown).toContain(
+      'Background process &quot;server&quot; started with 1 preceding python cell.',
+    );
 
     await button.click();
 

@@ -103,6 +103,29 @@ HTTPServer(("127.0.0.1", 8000), SimpleHTTPRequestHandler).serve_forever()
 
 The cell runs in a fresh process. Its **Run** button becomes **Stop**, and Run All immediately continues to the next cell. The same syntax works with `javascript`, `bash`, and `r` fences. The process uses that language's configured executable and the note's configured working directory.
 
+By default, a background cell tangles and replays preceding, non-background
+cells of the same language. This gives its fresh process the imports and
+definitions available above it in the document:
+
+````markdown
+```python
+app = create_app()
+```
+
+```python {background=server}
+app.run()
+```
+````
+
+Use `{background=server context=none}` when the background cell is
+self-contained. Context does not cross language boundaries, so a Bash cell
+cannot set state for a Python background cell. Run All executes setup cells in
+the notebook kernel and replays them in the background process. Restarting the
+process retangles the current Markdown source, including edits to setup cells.
+
+For `nb-run --only`, only the selected cell emits output, but a selected
+background cell still receives its preceding source context.
+
 Background names are scoped to a note. The plugin stops its processes when you press **Stop**, close or rename the note, restart its kernels, or unload the plugin. If a process exits by itself, the button returns to **Run**. Startup output is stored in the note, but later output is only drained in memory so a long-running server cannot grow the Markdown file without limit.
 
 Use a unique name for each concurrent process in a note. A second cell cannot start a process while the same name is already running.

@@ -28,6 +28,10 @@ import type { ShellKernel } from "./kernels/ShellKernel";
 import type { PluginSettings } from "./settings/Settings";
 import { readNotebookFrontmatter, NotebookFrontmatter } from "./NotebookFrontmatter";
 import type { BackgroundExecutionContext } from "./BackgroundProcessManager";
+import {
+  backgroundStartedMessage,
+  buildBackgroundProgram,
+} from "./BackgroundProgram";
 
 type AnyKernel = BaseKernel | ShellKernel;
 
@@ -324,16 +328,19 @@ export async function runAll(
               text: `Background process "${block.background}" is already running.\n`,
             });
           } else {
+            const program = buildBackgroundProgram(allBlocks, block);
             await background.start({
               sourcePath,
               name: block.background,
               language: block.language,
-              source: block.source,
+              source: program.source,
+              precedingCellCount: program.precedingCellCount,
+              sourceMap: program.sourceMap,
             }, (chunk) => { output.add(chunk); }, controller.signal);
             output.add({
               type: "stream",
               stream: "stdout",
-              text: `Background process "${block.background}" started.\n`,
+              text: backgroundStartedMessage(block.background, block.language, program),
             });
           }
         } else {

@@ -34,6 +34,11 @@ import type {
   BackgroundCellRequest,
   BackgroundExecutionContext,
 } from "./BackgroundProcessManager";
+import {
+  backgroundStartedMessage,
+  buildBackgroundProgram,
+} from "./BackgroundProgram";
+import { parseRunBlocks } from "./CellParser";
 
 type AnyKernel = BaseKernel | ShellKernel;
 
@@ -134,6 +139,7 @@ export interface RunButtonContext {
 export interface RunArgs {
   id?: string;
   format?: string;
+  context?: string;
   [key: string]: string | undefined;
 }
 
@@ -144,6 +150,7 @@ export interface RunnableCell {
   id?: string;
   format?: string;
   background?: string;
+  context?: string;
 }
 
 interface RunCellOptions {
@@ -243,17 +250,21 @@ export async function runCell(
         if (!context.background) {
           throw new Error("Background cells are unavailable in this runner");
         }
+        const blocks = file ? parseRunBlocks(await app.vault.cachedRead(file)) : [];
+        const program = buildBackgroundProgram(blocks, cell);
         const request: BackgroundCellRequest = {
           sourcePath,
           name: cell.background,
           language: cell.language,
-          source: cell.source,
+          source: program.source,
+          precedingCellCount: program.precedingCellCount,
+          sourceMap: program.sourceMap,
         };
         await context.background.start(request, onChunk, controller.signal);
         onChunk({
           type: "stream",
           stream: "stdout",
-          text: `Background process "${cell.background}" started.\n`,
+          text: backgroundStartedMessage(cell.background, cell.language, program),
         });
       } else {
         executedKernel = context.acquireKernel(cell.language, sourcePath);
@@ -500,6 +511,7 @@ export async function processCodeBlock(
             id: runArgs.id,
             format: runArgs.format,
             background: runArgs.background,
+            context: runArgs.context,
             language,
             source: src,
             lineEnd: sectionInfo?.lineEnd ?? 0,
@@ -520,6 +532,7 @@ export async function processCodeBlock(
         id: runArgs.id,
         format: runArgs.format,
         background: runArgs.background,
+        context: runArgs.context,
         language,
         source: src,
         lineEnd: sectionInfo?.lineEnd ?? 0,

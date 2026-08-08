@@ -11,6 +11,10 @@ import { DEFAULT_SETTINGS } from '../src/settings/Settings';
 import { KernelTimeoutError } from '../src/kernels/BaseKernel';
 import * as HtmlToImage from '../src/output/HtmlToImage';
 import { findRunBlockAtLine } from '../src/CellParser';
+import {
+  backgroundStartedMessage,
+  buildBackgroundProgram,
+} from '../src/BackgroundProgram';
 
 type RunAllResult = {
   total: number;
@@ -191,6 +195,79 @@ describe('parseRunBlocks', () => {
     ]);
   });
 
+  it('tangles preceding same-language cells for a background process', () => {
+    const blocks = parseRunBlocks([
+      '```python', 'from app import server', '```',
+      '```bash', 'echo ignored', '```',
+      '```python {background=old}', 'old_server.run()', '```',
+      '```python', '@server.route("/")', 'def index(): return "ok"', '```',
+      '```python {background=server}', 'server.run()', '```',
+    ].join('\n'));
+
+    const program = buildBackgroundProgram(blocks, blocks[4]);
+    expect(program.source).toBe([
+      'from app import server',
+      '@server.route("/")\ndef index(): return "ok"',
+      'server.run()',
+    ].join('\n\n'));
+    expect(program.precedingCellCount).toBe(2);
+    expect(program.sourceMap).toEqual([
+      {
+        generatedLineStart: 1, generatedLineEnd: 1,
+        noteLineStart: 2, role: 'setup',
+      },
+      {
+        generatedLineStart: 3, generatedLineEnd: 4,
+        noteLineStart: 11, role: 'setup',
+      },
+      {
+        generatedLineStart: 6, generatedLineEnd: 6,
+        noteLineStart: 15, role: 'background',
+      },
+    ]);
+  });
+
+  it('supports an isolated background process with context=none', () => {
+    const blocks = parseRunBlocks([
+      '```python', 'setup()', '```',
+      '```python {background=server context=none}', 'serve()', '```',
+    ].join('\n'));
+
+    const program = buildBackgroundProgram(blocks, blocks[1]);
+    expect(program.source).toBe('serve()');
+    expect(program.precedingCellCount).toBe(0);
+    expect(program.sourceMap).toHaveLength(1);
+    expect(backgroundStartedMessage('server', 'python', program)).toBe(
+      'Background process "server" started in isolation (context=none).\n',
+    );
+  });
+
+  it.each([
+    ['a trailing newline', 'serve()\n'],
+    ['CRLF and a trailing newline', 'serve()\r\n'],
+  ])('matches Reading View source with %s', (_description, targetSource) => {
+    const blocks = parseRunBlocks([
+      '```python', 'setup()', '```',
+      '```python {background=server}', 'serve()', '```',
+    ].join('\n'));
+
+    const program = buildBackgroundProgram(blocks, {
+      ...blocks[1],
+      source: targetSource,
+    });
+    expect(program.source).toBe('setup()\n\nserve()');
+    expect(program.precedingCellCount).toBe(1);
+    expect(program.sourceMap).toHaveLength(2);
+  });
+
+  it('rejects unknown background context modes', () => {
+    const blocks = parseRunBlocks(
+      '```python {background=server context=kernel}\nserve()\n```',
+    );
+    expect(() => buildBackgroundProgram(blocks, blocks[0]))
+      .toThrow('use "above" or "none"');
+  });
+
   it('resolves language aliases to canonical names', () => {
     const content = '```js\nconsole.log(1)\n```\n\n```sh\nls\n```\n';
     const blocks = parseRunBlocks(content);
@@ -276,6 +353,8 @@ describe('runAll', () => {
 
   it('starts a background cell and continues to later cells', async () => {
     const memory = memoryNotebook([
+      '```python', 'setup()', '```',
+      '',
       '```python {background=server}', 'serve()', '```',
       '',
       '```python', 'print("client")', '```',
@@ -307,13 +386,26 @@ describe('runAll', () => {
       background,
     );
 
-    expect(result).toEqual({ total: 2, succeeded: 2, failed: 0, skipped: false });
+    expect(result).toEqual({ total: 3, succeeded: 3, failed: 0, skipped: false });
     expect(background.start).toHaveBeenCalledTimes(1);
     expect(acquire).toHaveBeenCalledTimes(1);
+    expect(background.start).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: 'setup()\n\nserve()',
+        precedingCellCount: 1,
+      }),
+      expect.any(Function),
+      expect.any(AbortSignal),
+    );
+    expect(kernel.execute).toHaveBeenCalledWith(
+      'setup()', expect.any(Function), expect.any(Number), expect.any(AbortSignal),
+    );
     expect(kernel.execute).toHaveBeenCalledWith(
       'print("client")', expect.any(Function), expect.any(Number), expect.any(AbortSignal),
     );
-    expect(memory.content()).toContain('Background process &quot;server&quot; started.');
+    expect(memory.content()).toContain(
+      'Background process &quot;server&quot; started with 1 preceding python cell.',
+    );
   });
 
   it('continues after a failed cell when stop on first error is disabled', async () => {
