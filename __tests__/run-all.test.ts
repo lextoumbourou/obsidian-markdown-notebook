@@ -466,7 +466,14 @@ describe('runAll', () => {
       undefined,
       background,
     );
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    // runAll reaches start() after a variable number of async steps, so wait
+    // for it, then allow a few more ticks in which the next cell could run.
+    for (let tick = 0; tick < 100 && events.length === 0; tick++) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    for (let tick = 0; tick < 5; tick++) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
     expect(events).toEqual(['starting']);
 
     markReady();
