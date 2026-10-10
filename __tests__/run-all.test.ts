@@ -149,6 +149,20 @@ describe('parseRunBlocks', () => {
     expect(blocks[0].source).toBe('import pandas as pd\ndf = pd.DataFrame()\ndf');
   });
 
+  it('skips fences marked run=false', () => {
+    const content = '```python {run=false}\nmodel(context)\n```\n\n```python {id=real}\ny = 2\n```\n';
+    const blocks = parseRunBlocks(content);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].id).toBe('real');
+    expect(blocks[0].source).toBe('y = 2');
+  });
+
+  it('treats run=false case-insensitively and keeps other run values executable', () => {
+    const content = '```python {run=FALSE}\na = 1\n```\n\n```python {run=true}\nb = 2\n```\n';
+    const blocks = parseRunBlocks(content);
+    expect(blocks.map((b) => b.source)).toEqual(['b = 2']);
+  });
+
   it('skips unsupported languages', () => {
     const content = '```ruby\nx = 1\n```\n\n```python\ny = 2\n```\n';
     const blocks = parseRunBlocks(content);

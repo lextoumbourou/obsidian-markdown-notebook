@@ -116,6 +116,67 @@ describe('Run button', () => {
     expect(root.querySelector('.nb-run-button')?.textContent).toBe('▶ Run');
   });
 
+  it('renders run=false fences as plain code with no run button', async () => {
+    const source = 'reply = model(context)';
+    const markdown = `\`\`\`python {run=false}\n${source}\n\`\`\``;
+    const acquireKernel = jest.fn();
+    const context = {
+      app: {
+        workspace: { getLeavesOfType: jest.fn(() => []) },
+        vault: { getAbstractFileByPath: jest.fn(() => null) },
+      },
+      getSettings: () => DEFAULT_SETTINGS,
+      acquireKernel,
+      peekExecutionCount: () => 0,
+    };
+    const ctx = {
+      sourcePath: 'note.md',
+      getSectionInfo: () => ({ text: markdown, lineStart: 0, lineEnd: 2 }),
+    } as unknown as MarkdownPostProcessorContext;
+    Object.assign(globalThis, { window: {}, HTMLPreElement: FakeElement });
+    const root = new FakeElement();
+
+    await processCodeBlock(source, root as unknown as HTMLElement, ctx, context as never, 'python');
+
+    expect(root.querySelector('.language-python')).not.toBeNull();
+    expect(root.querySelector('.nb-run-button')).toBeNull();
+    expect(root.querySelector('.nb-exec-count')).toBeNull();
+    expect(acquireKernel).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the note when section info is missing', async () => {
+    const source = 'reply = model(context)';
+    const file = new TFile();
+    file.path = 'note.md';
+    Object.assign(file, { extension: 'md', parent: { path: '' } });
+    const note = `\`\`\`python {run=false}\n${source}\n\`\`\`\n\n\`\`\`python\nx = 1\n\`\`\``;
+    const context = {
+      app: {
+        workspace: { getLeavesOfType: jest.fn(() => []) },
+        vault: {
+          getAbstractFileByPath: jest.fn(() => file),
+          cachedRead: jest.fn(async () => note),
+        },
+      },
+      getSettings: () => DEFAULT_SETTINGS,
+      acquireKernel: jest.fn(),
+      peekExecutionCount: () => 0,
+    };
+    const ctx = {
+      sourcePath: 'note.md',
+      getSectionInfo: () => null,
+    } as unknown as MarkdownPostProcessorContext;
+    Object.assign(globalThis, { window: {}, HTMLPreElement: FakeElement });
+
+    const disabled = new FakeElement();
+    await processCodeBlock(source, disabled as unknown as HTMLElement, ctx, context as never, 'python');
+    expect(disabled.querySelector('.nb-run-button')).toBeNull();
+
+    const runnable = new FakeElement();
+    await processCodeBlock('x = 1', runnable as unknown as HTMLElement, ctx, context as never, 'python');
+    expect(runnable.querySelector('.nb-run-button')).not.toBeNull();
+  });
+
   it('persists escaped traceback output with the failed status', async () => {
     const source = 'raise ValueError("bad")';
     let markdown = `\`\`\`python\n${source}\n\`\`\``;

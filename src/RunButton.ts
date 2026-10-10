@@ -39,7 +39,7 @@ import {
   backgroundStartedMessage,
   buildBackgroundProgram,
 } from "./BackgroundProgram";
-import { parseFenceArgs, parseRunBlocks } from "./CellParser";
+import { isRunDisabled, parseFenceArgs, parseRunBlocks } from "./CellParser";
 
 type AnyKernel = BaseKernel | ShellKernel | DuckDBKernel;
 
@@ -142,6 +142,7 @@ export interface RunArgs {
   format?: string;
   context?: string;
   ready?: string;
+  run?: string;
   [key: string]: string | undefined;
 }
 
@@ -422,9 +423,24 @@ async function stopBackgroundCell(
   return stopped;
 }
 
+/** Without section info Obsidian gives no fence line, so look the block up in
+ * the note: it is disabled when no runnable cell has this source but a
+ * run=false fence does. Never throws; an unreadable note counts as runnable. */
+async function isDisabledInNote(app: App, sourcePath: string, src: string): Promise<boolean> {
+  try {
+    const file = app.vault.getAbstractFileByPath(sourcePath);
+    if (!(file instanceof TFile)) return false;
+    const content = await app.vault.cachedRead(file);
+    if (!/\{[^}]*\brun=false\b/i.test(content)) return false;
+    return !parseRunBlocks(content).some((block) => block.source === src);
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Registered via plugin.registerMarkdownCodeBlockProcessor(language, ...).
- * All blocks for supported languages get a run button — no {run} marker needed.
+ * All blocks for supported languages get a run button unless marked {run=false}.
  */
 export async function processCodeBlock(
   src: string,
@@ -437,18 +453,6 @@ export async function processCodeBlock(
   const { app } = context;
 
   const pre = renderPlainCodeBlock(src, el, language);
-  const hash = await hashCodeFence(language, src);
-  const flightKey = `${ctx.sourcePath}::${hash}`;
-
-  const buttonWrap = pre.createDiv({ cls: "nb-run-button-wrap" });
-  const countBadge = buttonWrap.createEl("span", {
-    cls: "nb-exec-count",
-    text: `[${context.peekExecutionCount(language, ctx.sourcePath)}]`,
-  });
-  const button = buttonWrap.createEl("button", {
-    cls: "nb-run-button",
-    text: "▶ Run",
-  });
   const initialSectionInfo = ctx.getSectionInfo(el);
   let initialArgs: RunArgs = {};
   if (initialSectionInfo) {
@@ -461,6 +465,22 @@ export async function processCodeBlock(
       }
     }
   }
+  // {run=false}: show the code, but it is not a notebook cell.
+  if (isRunDisabled(initialArgs)) return;
+  if (!initialSectionInfo && await isDisabledInNote(app, ctx.sourcePath, src)) return;
+
+  const hash = await hashCodeFence(language, src);
+  const flightKey = `${ctx.sourcePath}::${hash}`;
+
+  const buttonWrap = pre.createDiv({ cls: "nb-run-button-wrap" });
+  const countBadge = buttonWrap.createEl("span", {
+    cls: "nb-exec-count",
+    text: `[${context.peekExecutionCount(language, ctx.sourcePath)}]`,
+  });
+  const button = buttonWrap.createEl("button", {
+    cls: "nb-run-button",
+    text: "▶ Run",
+  });
   if (initialArgs.background) {
     registerBackgroundButton(ctx.sourcePath, initialArgs.background, button);
     if (context.background?.isRunning(ctx.sourcePath, initialArgs.background)) {
@@ -495,6 +515,11 @@ export async function processCodeBlock(
           break;
         }
       }
+    }
+    // The fence may have gained {run=false} since this button was drawn.
+    if (isRunDisabled(runArgs)) {
+      new Notice("Notebook: this block is marked run=false.");
+      return;
     }
 
     if (

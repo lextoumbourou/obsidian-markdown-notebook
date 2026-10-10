@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- `{run=false}` fence attribute: show a code block without running it. It gets no Run button and is skipped by Run All, run-at-cursor and `nb-run`.
+
 ## [0.6.1] - 2026-10-10
 
 ### Added

@@ -228,6 +228,19 @@ plt.show()
 
 The ID is used as the image filename (`revenue-chart.png`). Without an ID, images are named `<hash>.png` after the cell's content hash. IDs make filenames stable across re-runs and easier to reference from other notes — but note that filenames are not namespaced by note, so two notes sharing a media folder should use distinct IDs.
 
+### Code that should not run
+
+Every fence in a supported language is a cell. To show code without running it, such as pseudocode or a snippet that depends on names defined elsewhere, mark the fence `run=false`:
+
+````markdown
+```python {run=false}
+while True:
+    reply = model(context)
+```
+````
+
+The block keeps its syntax highlighting but gets no Run button, and Run All and `nb-run` skip it (it is not counted by `--list` or `--cell`). Static site generators that strip fence attributes render it as ordinary code.
+
 ### Document-level defaults (frontmatter)
 
 Set defaults for all cells in a note via the `notebook:` key in frontmatter:

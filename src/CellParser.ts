@@ -50,6 +50,12 @@ export function parseFenceArgs(value: string): FenceArgs {
   return args;
 }
 
+/** A fence marked `{run=false}` is shown as code but never executed: it is
+ * left out of Run All, nb-run and run-at-cursor, and gets no Run button. */
+export function isRunDisabled(args: { run?: string }): boolean {
+  return args.run?.toLowerCase() === "false";
+}
+
 /** Return the closing marker for a complete persisted output block. */
 function findOutputEnd(lines: string[], start: number): number | null {
   if (!NB_OUTPUT_RE.test(lines[start])) return null;
@@ -62,7 +68,7 @@ function findOutputEnd(lines: string[], start: number): number | null {
 
 /**
  * Parse all executable code blocks from raw file content.
- * All fences for supported languages are included — no {run} marker needed.
+ * All fences for supported languages are included unless marked {run=false}.
  */
 export function parseRunBlocks(content: string): RunBlock[] {
   const lines = content.split(/\r?\n/);
@@ -90,6 +96,10 @@ export function parseRunBlocks(content: string): RunBlock[] {
         while (i < lines.length && !lines[i].startsWith("```")) {
           sourceLines.push(lines[i]);
           i++;
+        }
+        if (isRunDisabled(args)) {
+          i++;
+          continue;
         }
         blocks.push({
           language: lang,
