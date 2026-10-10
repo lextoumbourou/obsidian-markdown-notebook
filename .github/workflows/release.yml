@@ -37,4 +37,5 @@ jobs:
             main.js
             manifest.json
             styles.css
+            cli.js
           generate_release_notes: true

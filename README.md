@@ -365,6 +365,13 @@ For manual smoke testing, open `example-vault/` directly as an Obsidian vault â€
 
 `npm run build` also produces `cli.js` (`nb-run`), a headless cell runner that uses the same kernels and writes the same `nb-output` blocks as the plugin â€” useful for refreshing notebook outputs at publish time, CI, or editing outside Obsidian.
 
+Each release also attaches `cli.js`, a single file with no dependencies beyond Node itself, so you can run a notebook without cloning or building:
+
+```text
+curl -LO https://github.com/lextoumbourou/obsidian-markdown-notebook/releases/latest/download/cli.js
+node cli.js Note.md
+```
+
 ```text
 node cli.js Note.md --list              # list executable cells
 node cli.js Note.md --cell 3            # run cells 1..3 (shared kernel state)
