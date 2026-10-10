@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.6.1] - 2026-10-10
+
+### Added
+- Releases now attach `cli.js`, so `nb-run` can be downloaded as a single file and run with Node, without cloning or building the repository
+
 ## [0.6.0] - 2026-08-08
 
 ### Added
