@@ -29,6 +29,7 @@ export class DuckDBKernel {
   constructor(
     private readonly duckdbPath: string,
     private readonly cwd?: string,
+    private readonly environment: Record<string, string> = {},
   ) {}
 
   async ensureStarted(): Promise<void> {
@@ -85,7 +86,7 @@ export class DuckDBKernel {
     const proc = spawn(
       this.duckdbPath,
       ["-batch", "-init", initFile, "-html", ":memory:"],
-      { env: kernelEnv(), cwd: this.cwd },
+      { env: kernelEnv(this.environment), cwd: this.cwd },
     );
     this.process = proc;
     const cleanupInitFile = () => {

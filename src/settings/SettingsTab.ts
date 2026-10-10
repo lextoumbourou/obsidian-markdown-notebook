@@ -1,4 +1,4 @@
-import { App, PluginSettingTab, Setting } from "obsidian";
+import { App, PluginSettingTab, SecretComponent, Setting } from "obsidian";
 import type MarkdownNotebookPlugin from "../main";
 
 export class SettingsTab extends PluginSettingTab {
@@ -61,6 +61,63 @@ export class SettingsTab extends PluginSettingTab {
             }
           })
       );
+
+    containerEl.createEl("h3", { text: "Notebook environment" });
+    new Setting(containerEl)
+      .setName("Secret environment variables")
+      .setDesc("Give one note access to a secret as an environment variable. The value stays out of the note and plugin settings, but code in that note can print it into saved output.")
+      .addButton((button) => button.setButtonText("Add variable").onClick(async () => {
+        this.plugin.settings.secretEnvironment.push({
+          notePath: this.app.workspace.getActiveFile()?.path ?? "",
+          variable: "",
+          secretId: "",
+        });
+        await this.plugin.saveSecretSettings();
+        this.display();
+      }));
+
+    this.plugin.settings.secretEnvironment.forEach((binding, index) => {
+      new Setting(containerEl)
+        .setName(`Variable ${index + 1}`)
+        .addExtraButton((button) => button
+          .setIcon("trash")
+          .setTooltip("Remove variable")
+          .onClick(async () => {
+            this.plugin.settings.secretEnvironment.splice(index, 1);
+            await this.plugin.saveSecretSettings();
+            this.display();
+          }));
+
+      new Setting(containerEl)
+        .setName("Note path")
+        .setDesc("Exact path from the vault root")
+        .addText((text) => text
+          .setPlaceholder("notes/example.md")
+          .setValue(binding.notePath)
+          .onChange(async (value) => {
+            binding.notePath = value;
+            await this.plugin.saveSecretSettings();
+          }));
+
+      new Setting(containerEl)
+        .setName("Environment variable")
+        .addText((text) => text
+          .setPlaceholder("OPENAI_API_KEY")
+          .setValue(binding.variable)
+          .onChange(async (value) => {
+            binding.variable = value;
+            await this.plugin.saveSecretSettings();
+          }));
+
+      new Setting(containerEl)
+        .setName("Secret")
+        .addComponent((el) => new SecretComponent(this.app, el)
+          .setValue(binding.secretId)
+          .onChange(async (value) => {
+            binding.secretId = value;
+            await this.plugin.saveSecretSettings();
+          }));
+    });
 
     // ── Language paths ───────────────────────────────────────────────────────
 

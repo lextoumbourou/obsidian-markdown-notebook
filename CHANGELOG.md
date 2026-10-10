@@ -2,9 +2,16 @@
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-11
+
 ### Added
 
 - `{run=false}` fence attribute: show a code block without running it. It gets no Run button and is skipped by Run All, run-at-cursor and `nb-run`.
+- Note-scoped environment variable bindings backed by Obsidian SecretStorage. Plugin settings retain only secret IDs, while kernels and background processes receive the resolved values at launch. The minimum Obsidian version is now 1.11.5, which encrypts Secret Storage on disk.
+
+### Fixed
+
+- Secret environment variable settings now show the note path, variable name, and secret picker on separate rows so each field remains readable.
 
 ## [0.6.1] - 2026-10-10
 

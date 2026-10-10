@@ -1,4 +1,5 @@
 import type { App, TFile } from "obsidian";
+import { createHash } from "crypto";
 import * as path from "path";
 import type { NotebookFrontmatter } from "./NotebookFrontmatter";
 import type { PluginSettings } from "./settings/Settings";
@@ -8,6 +9,7 @@ export interface NotebookKernelConfig {
   language: string;
   executable: string;
   cwd: string;
+  environment?: Record<string, string>;
 }
 
 type ExecutableKey = "python" | "node" | "shell" | "r" | "duckdb";
@@ -57,11 +59,15 @@ export function resolveWorkingDirectory(
 }
 
 export function notebookKernelSessionKey(config: NotebookKernelConfig): string {
+  const environmentHash = createHash("sha256")
+    .update(JSON.stringify(Object.entries(config.environment ?? {}).sort(([a], [b]) => a.localeCompare(b))))
+    .digest("hex");
   return JSON.stringify([
     config.notePath,
     config.language,
     config.executable,
     config.cwd,
+    environmentHash,
   ]);
 }
 

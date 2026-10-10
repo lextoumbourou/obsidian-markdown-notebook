@@ -37,6 +37,7 @@ export interface BackgroundCellRequest {
 export interface BackgroundProcessSpec extends BackgroundCellRequest {
   executable: string;
   cwd: string;
+  environment?: Record<string, string>;
 }
 
 export interface BackgroundExecutionContext {
@@ -191,8 +192,8 @@ export class BackgroundProcessManager {
       proc = spawn(spec.executable, languageLaunch(spec.language, tempFile), {
         cwd: spec.cwd,
         env: spec.language === "python"
-          ? { ...kernelEnv(), PYTHONUNBUFFERED: "1" }
-          : kernelEnv(),
+          ? { ...kernelEnv(spec.environment), PYTHONUNBUFFERED: "1" }
+          : kernelEnv(spec.environment),
         detached: process.platform !== "win32",
       });
     } catch (error) {

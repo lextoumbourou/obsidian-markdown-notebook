@@ -19,14 +19,16 @@ import type { OutputChunk } from "../output/MimeRenderer";
 export class ShellKernel {
   private shellPath: string;
   private cwd?: string;
+  private environment: Record<string, string>;
   private current: ChildProcessWithoutNullStreams | null = null;
   private execQueue: Promise<void> = Promise.resolve();
   private intentionallyStopped = new WeakSet<ChildProcessWithoutNullStreams>();
   executionCount = 0;
 
-  constructor(shellPath: string, cwd?: string) {
+  constructor(shellPath: string, cwd?: string, environment: Record<string, string> = {}) {
     this.shellPath = shellPath;
     this.cwd = cwd;
+    this.environment = environment;
   }
 
   async ensureStarted(): Promise<void> {} // no persistent process
@@ -58,7 +60,7 @@ export class ShellKernel {
   ): Promise<void> {
     if (signal?.aborted) return Promise.reject(new KernelCancelledError());
     return new Promise<void>((resolve, reject) => {
-      const proc = spawn(this.shellPath, ["-c", code], { env: kernelEnv(), cwd: this.cwd });
+      const proc = spawn(this.shellPath, ["-c", code], { env: kernelEnv(this.environment), cwd: this.cwd });
       this.current = proc;
       let settled = false;
       let cancelled = false;

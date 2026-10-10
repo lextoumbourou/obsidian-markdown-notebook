@@ -20,6 +20,7 @@ import { clearAllOutputBlocks, clearOutputBlock, clearStaleRunningBlocks } from 
 import { findRunBlockAtLine, type RunBlock } from "./CellParser";
 import { SUPPORTED_LANGUAGES, LANG_ALIASES } from "./languages";
 import { readNotebookFrontmatter } from "./NotebookFrontmatter";
+import { resolveNotebookSecrets } from "./NotebookSecrets";
 import {
   notebookKernelSessionKey,
   resolveNotebookKernelConfig,
@@ -122,14 +123,30 @@ export default class MarkdownNotebookPlugin extends Plugin {
     );
 
     this.registerEvent(
-      this.app.vault.on("rename", (_file, oldPath) => {
+      this.app.vault.on("rename", (file, oldPath) => {
         this.stopSessionsForNote(oldPath);
+        if (!(file instanceof TFile)) return;
+        let changed = false;
+        for (const binding of this.settings.secretEnvironment) {
+          if (binding.notePath !== oldPath) continue;
+          binding.notePath = file.path;
+          changed = true;
+        }
+        if (changed) void this.saveSettings();
       })
     );
 
     this.registerEvent(
       this.app.vault.on("delete", (file) => {
-        if (file instanceof TFile) this.stopSessionsForNote(file.path);
+        if (!(file instanceof TFile)) return;
+        this.stopSessionsForNote(file.path);
+        const remaining = this.settings.secretEnvironment.filter(
+          (binding) => binding.notePath !== file.path,
+        );
+        if (remaining.length !== this.settings.secretEnvironment.length) {
+          this.settings.secretEnvironment = remaining;
+          void this.saveSettings();
+        }
       })
     );
 
@@ -280,6 +297,7 @@ export default class MarkdownNotebookPlugin extends Plugin {
       this.settings,
       readNotebookFrontmatter(this.app, file),
     );
+    config.environment = this.notebookEnvironment(file.path);
     const key = notebookKernelSessionKey(config);
     let session = this.kernels.get(key);
     if (!session) {
@@ -397,13 +415,21 @@ export default class MarkdownNotebookPlugin extends Plugin {
 
   private createKernel(config: NotebookKernelConfig): AnyKernel {
     switch (config.language) {
-      case "python":     return new SubprocessKernel(config.executable, config.cwd);
-      case "javascript": return new NodeKernel(config.executable, config.cwd);
-      case "bash":       return new ShellKernel(config.executable, config.cwd);
-      case "r":          return new RKernel(config.executable, config.cwd);
-      case "sql":        return new DuckDBKernel(config.executable, config.cwd);
-      default:            return new ShellKernel(config.executable, config.cwd);
+      case "python":     return new SubprocessKernel(config.executable, config.cwd, config.environment);
+      case "javascript": return new NodeKernel(config.executable, config.cwd, config.environment);
+      case "bash":       return new ShellKernel(config.executable, config.cwd, config.environment);
+      case "r":          return new RKernel(config.executable, config.cwd, config.environment);
+      case "sql":        return new DuckDBKernel(config.executable, config.cwd, config.environment);
+      default:            return new ShellKernel(config.executable, config.cwd, config.environment);
     }
+  }
+
+  private notebookEnvironment(notePath: string): Record<string, string> {
+    return resolveNotebookSecrets(
+      notePath,
+      this.settings.secretEnvironment,
+      (id) => this.app.secretStorage.getSecret(id),
+    );
   }
 
   /** Restart one kernel (by settings key) or all kernels. */
@@ -448,19 +474,29 @@ export default class MarkdownNotebookPlugin extends Plugin {
       this.settings,
       readNotebookFrontmatter(this.app, file),
     );
+    config.environment = this.notebookEnvironment(file.path);
     await this.backgrounds.start({
       ...request,
       executable: config.executable,
       cwd: config.cwd,
+      environment: config.environment,
     }, onChunk, signal);
   }
 
   async loadSettings() {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    if (!Array.isArray(this.settings.secretEnvironment)) this.settings.secretEnvironment = [];
   }
 
   async saveSettings() {
     await this.saveData(this.settings);
+  }
+
+  async saveSecretSettings() {
+    await this.saveSettings();
+    for (const session of this.kernels.values()) session.kernel.stop();
+    this.kernels.clear();
+    await this.backgrounds.stopAll();
   }
 
   async updateRunAllToolbarVisibility(visible: boolean): Promise<void> {

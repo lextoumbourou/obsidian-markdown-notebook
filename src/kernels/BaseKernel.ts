@@ -65,7 +65,7 @@ export function raceWithCancellation<T>(
  * Obsidian launched from the Dock doesn't inherit the user's shell PATH,
  * so executables in /usr/local/bin or /opt/homebrew/bin are otherwise invisible.
  */
-export function kernelEnv(): Record<string, string | undefined> {
+export function kernelEnv(overrides: Record<string, string> = {}): Record<string, string | undefined> {
   const extra = [
     "/usr/local/bin",
     "/opt/homebrew/bin",
@@ -73,10 +73,10 @@ export function kernelEnv(): Record<string, string | undefined> {
     "/usr/bin",
     "/bin",
   ];
-  const current = process.env.PATH ?? "";
-  const parts = current.split(":").filter(Boolean);
+  const current = overrides.PATH ?? process.env.PATH ?? "";
+  const parts = [...new Set(current.split(":").filter(Boolean))];
   const merged = [...extra.filter((p) => !parts.includes(p)), ...parts].join(":");
-  return { ...process.env, PATH: merged };
+  return { ...process.env, ...overrides, PATH: merged };
 }
 
 /**

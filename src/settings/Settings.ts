@@ -1,6 +1,7 @@
 import { DEFAULT_OUTPUT_LIMIT_KB } from "../output/OutputLimiter";
 
 export interface PluginSettings {
+  secretEnvironment: SecretEnvironmentBinding[];
   pythonPath: string;
   nodePath: string;
   shellPath: string;
@@ -15,7 +16,14 @@ export interface PluginSettings {
   markdownImageLinks: boolean;
 }
 
+export interface SecretEnvironmentBinding {
+  notePath: string;
+  variable: string;
+  secretId: string;
+}
+
 export const DEFAULT_SETTINGS: PluginSettings = {
+  secretEnvironment: [],
   pythonPath: "python3",
   nodePath: "node",
   shellPath: "bash",

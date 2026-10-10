@@ -47,6 +47,7 @@ Comment markers are invisible in all standard Markdown renderers — including P
 - **Managed background cells** — start and stop long-running servers from Python, JavaScript, Bash, or R cells without blocking later cells
 - **Clear outputs** — remove one cell's persisted output or every output block in the active note
 - **Notebook-scoped kernel state** — variables are shared between cells in one note but isolated from other notes
+- **Note-scoped secrets**: pass selected Obsidian SecretStorage entries to one note's kernels as environment variables
 - **DuckDB SQL cells**: query CSV, JSON, and Parquet files directly, with temporary tables and macros shared across cells
 - **Predictable relative paths** — every kernel starts in the note's folder, so `data.csv` and other relative paths work naturally
 - **Persistent failure diagnostics**: Python, Node.js, R, and DuckDB errors plus non-zero shell exits are marked as failed, with escaped diagnostics and preceding output stored in the note
@@ -57,7 +58,7 @@ Comment markers are invisible in all standard Markdown renderers — including P
 
 ## Requirements
 
-- Obsidian 1.7.2 or later (desktop only)
+- Obsidian 1.11.5 or later (desktop only)
 - One or more of:
   - Python 3.8+ (`python3` on PATH)
   - Node.js 14+ (`node` on PATH)
@@ -274,6 +275,16 @@ The `python`, `node`, `shell`, `r`, and `duckdb` frontmatter keys override their
 
 Each note has its own persistent language kernels. State is shared between cells in that note, while variables, working directories, execution counts, and per-note environments do not leak into other notes. A note's kernels are shut down when its last Markdown tab or split closes, or when the note is renamed or deleted; reopening it starts a fresh session.
 
+### Environment variables and secrets
+
+The plugin passes Obsidian's existing environment to each kernel. An Obsidian app started from the Dock does not read your shell's `.bashrc` or `.zshrc`, so a key defined only there may be missing from notebook cells.
+
+For a key that should be available to one note, open **Settings → Markdown Notebook → Notebook environment** and add a variable. Enter the note's exact vault-relative path, such as `notes/Agent Harness.md`, enter the environment variable name, such as `OPENAI_API_KEY`, and select or create a secret using Obsidian's SecretStorage picker. The picker stores the value in Obsidian's vault-local secret storage. This plugin saves only the note path, variable name, and secret ID in its `data.json`; it passes the value to that note's Python, JavaScript, Bash, R, DuckDB, and background processes when they start. For example, a Python cell can then use `openai.OpenAI()` without putting an API key in the note.
+
+Bindings are limited to the exact note path in settings. Running code in that note can read the key and can print it into the saved Markdown output, so grant keys only to notes whose code you trust. Other environment variables already present in Obsidian remain available to every notebook. If you change a secret while a persistent kernel or background process is running, restart that kernel or process to pick up the new value. Renaming a note updates its bindings; deleting it removes them.
+
+`nb-run` runs outside Obsidian and cannot read Obsidian's SecretStorage. It continues to inherit its invoking shell's environment. Set `OPENAI_API_KEY` in that shell before running the CLI. Secrets are not stored in notebook frontmatter or Markdown files.
+
 ### Commands
 
 | Command | Description |
@@ -302,6 +313,7 @@ Clear commands modify only the note's `nb-output` blocks. Saved PNG attachments 
 | Shell path | `bash` | Path to the shell interpreter |
 | R path | `R` | Path to the R executable |
 | DuckDB path | `duckdb` | Path to the DuckDB CLI executable |
+| Secret environment variables | *(none)* | Exact note path and environment variable name mapped to an Obsidian SecretStorage entry |
 | Default output format | `html` | Format used when no `format=` arg is set (`html` or `image`) |
 | Media folder | *(empty)* | Vault-relative folder for saved images. Empty = save next to the note. |
 | Markdown image links | off | Use `![](path)` instead of `![[file]]` for saved images |
@@ -398,6 +410,8 @@ node cli.js Note.md --vault-root Vault  # explicit root for notebook.cwd: /
 Because each invocation starts fresh kernels, targeting a cell runs every cell *up to and including* it by default (Jupyter's "run up to here"), so earlier cells' variables are available; `--only` skips the prelude. Interpreter paths default to `python3`/`node`/`bash`/`R`/`duckdb` and can be overridden with `--python`, `--node`, `--shell`, `--r`, or `--duckdb`. Frontmatter `notebook:` defaults, including `cwd`, `outputLimit`, and per-language executable paths, are respected.
 
 The CLI uses the same `cwd` rules as the plugin. For `cwd: /` or `cwd: vault`, it searches upward from the note for the nearest `.obsidian` directory. If the note is outside a vault copy, pass `--vault-root <dir>`; the CLI fails clearly rather than interpreting `/` as the filesystem root. Relative frontmatter executable paths resolve from the note, while relative command-line executable paths resolve from the shell's current directory. The output limit applies to blocks written with `--write`; live terminal output continues streaming in full.
+
+The CLI inherits environment variables from the shell that launches it. Obsidian SecretStorage bindings are available only in the Obsidian plugin.
 
 Two differences from the plugin remain: `format=image` only saves native images (matplotlib/R PNGs) — the browser HTML-to-PNG fallback needs a DOM and degrades to `format=html`; and the media folder is resolved relative to the note's directory.
 

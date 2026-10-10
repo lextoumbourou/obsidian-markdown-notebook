@@ -333,16 +333,25 @@ describe('MarkdownNotebookPlugin', () => {
     const renamedStop = jest.spyOn(renamedKernel, 'stop');
     const deletedStop = jest.spyOn(deletedKernel, 'stop');
     const closedStop = jest.spyOn(closedKernel, 'stop');
+    plugin.settings.secretEnvironment = [
+      { notePath: renamed.path, variable: 'OPENAI_API_KEY', secretId: 'openai' },
+      { notePath: deleted.path, variable: 'OPENAI_API_KEY', secretId: 'openai' },
+    ];
 
     const vaultOn = plugin.app.vault.on as jest.Mock;
     const rename = vaultOn.mock.calls.find(([name]) => name === 'rename')![1];
     const remove = vaultOn.mock.calls.find(([name]) => name === 'delete')![1];
-    rename(renamed, renamed.path);
+    const oldPath = renamed.path;
+    renamed.path = 'one/Renamed.md';
+    rename(renamed, oldPath);
     remove(deleted);
 
     expect(renamedStop).toHaveBeenCalled();
     expect(deletedStop).toHaveBeenCalled();
     expect(closedStop).not.toHaveBeenCalled();
+    expect(plugin.settings.secretEnvironment).toEqual([
+      { notePath: renamed.path, variable: 'OPENAI_API_KEY', secretId: 'openai' },
+    ]);
 
     const workspaceOn = plugin.app.workspace.on as jest.Mock;
     const layoutChange = workspaceOn.mock.calls.find(([name]) => name === 'layout-change')![1];
