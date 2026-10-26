@@ -21,7 +21,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { webcrypto } from "crypto";
 import { parseRunBlocks, RunBlock } from "./CellParser";
-import { applyOutputBlock, OutputFormat, OutputStatus, ERROR_HTML, timeoutHtml } from "./OutputBlockCore";
+import { applyOutputBlock, CellLocator, OutputFormat, OutputStatus, ERROR_HTML, timeoutHtml } from "./OutputBlockCore";
 import { KernelExecutionError, KernelTimeoutError } from "./kernels/BaseKernel";
 import { hashCodeFence } from "./HashUtils";
 import {
@@ -308,6 +308,31 @@ export function printChunk(chunk: OutputChunk, willWrite: boolean): void {
   }
 }
 
+export interface CellOutputWrite {
+  cell: CellLocator;
+  hash: string;
+  content: string;
+  format: OutputFormat;
+  id?: string;
+  status?: OutputStatus;
+}
+
+/**
+ * Write each cell's output block into the note. Cells are re-found by source,
+ * with the pre-run closing-fence line breaking ties between identical cells.
+ * Writing from the bottom up, as Run All does, keeps that line exact for every
+ * cell not yet written; top-down, each inserted block would shift the cells
+ * below it towards an earlier duplicate.
+ */
+export function applyCellOutputs(content: string, writes: CellOutputWrite[]): string {
+  let updated = content;
+  const bottomUp = [...writes].sort((a, b) => b.cell.hintLine - a.cell.hintLine);
+  for (const w of bottomUp) {
+    updated = applyOutputBlock(updated, w.cell, w.hash, w.content, w.format, w.id, w.status);
+  }
+  return updated;
+}
+
 function buildCellOutput(
   filePath: string,
   block: RunBlock,
@@ -513,7 +538,7 @@ async function main(): Promise<void> {
   for (const k of kernels.values()) k.stop();
 
   if (opts.write) {
-    let updated = content;
+    const writes: CellOutputWrite[] = [];
     for (const { block, chunks, nativeImageData, failure } of results) {
       const hash = await hashCodeFence(block.language, block.source);
       // Failed cells get the same status blocks the plugin writes
@@ -532,13 +557,12 @@ async function main(): Promise<void> {
             ),
             status: undefined,
           };
-      updated = applyOutputBlock(
-        updated,
-        { language: block.language, source: block.source, hintLine: block.lineEnd },
-        hash, outContent, format, block.id, status
-      );
+      writes.push({
+        cell: { language: block.language, source: block.source, hintLine: block.lineEnd },
+        hash, content: outContent, format, id: block.id, status,
+      });
     }
-    fs.writeFileSync(filePath, updated, "utf8");
+    fs.writeFileSync(filePath, applyCellOutputs(content, writes), "utf8");
     process.stderr.write(`Wrote ${results.length} output block(s) to ${path.basename(filePath)}\n`);
   }
 

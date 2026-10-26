@@ -1,4 +1,7 @@
+import { parseRunBlocks } from '../src/CellParser';
 import {
+  applyCellOutputs,
+  CellOutputWrite,
   parseArgs,
   parseNotebookFrontmatter,
   selectCells,
@@ -188,5 +191,59 @@ describe('selectCells', () => {
   it('errors on out-of-range cell', () => {
     expect(selectCells(blocks, { cell: 0, only: false })).toHaveProperty('error');
     expect(selectCells(blocks, { cell: 5, only: false })).toHaveProperty('error');
+  });
+});
+
+describe('applyCellOutputs', () => {
+  const fence = (source: string) => ['```python', source, '```', ''].join('\n');
+
+  // Three identical entropy(dist) cells, as in a note that re-runs the same
+  // expression on different inputs. None has an output block yet.
+  const note = [
+    fence('dist = [0.5, 0.5]'),
+    fence('entropy(dist)'),
+    fence('dist = [1.0]'),
+    fence('entropy(dist)'),
+    fence('dist = [0.99, 0.01]'),
+    fence('entropy(dist)'),
+  ].join('\n');
+
+  const writesFor = (content: string): CellOutputWrite[] =>
+    parseRunBlocks(content).map((block) => ({
+      cell: { language: block.language, source: block.source, hintLine: block.lineEnd },
+      hash: block.source.startsWith('entropy') ? 'e' : 'd',
+      content: `<pre>${block.source} -> line ${block.lineEnd}</pre>`,
+      format: 'html' as const,
+    }));
+
+  const outputAfter = (content: string, source: string, occurrence: number): string => {
+    const lines = content.split('\n');
+    const fences = lines
+      .map((line, i) => (line === source && lines[i + 1] === '```' ? i + 1 : -1))
+      .filter((i) => i >= 0);
+    return lines[fences[occurrence] + 2];
+  };
+
+  it('gives each identical cell its own output', () => {
+    const writes = writesFor(note);
+    const result = applyCellOutputs(note, writes);
+    const entropyLines = writes
+      .filter((w) => w.cell.source === 'entropy(dist)')
+      .map((w) => w.cell.hintLine);
+
+    entropyLines.forEach((line, i) => {
+      expect(outputAfter(result, 'entropy(dist)', i)).toBe(`<pre>entropy(dist) -> line ${line}</pre>`);
+    });
+  });
+
+  it('replaces existing outputs in place on a re-run', () => {
+    const first = applyCellOutputs(note, writesFor(note));
+    const rerun = applyCellOutputs(first, writesFor(first));
+    expect(rerun.match(/<!-- nb-output /g)).toHaveLength(6);
+    writesFor(first)
+      .filter((w) => w.cell.source === 'entropy(dist)')
+      .forEach((w, i) => {
+        expect(outputAfter(rerun, 'entropy(dist)', i)).toBe(`<pre>entropy(dist) -> line ${w.cell.hintLine}</pre>`);
+      });
   });
 });

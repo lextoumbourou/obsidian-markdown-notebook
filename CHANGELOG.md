@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- `nb-run --write` now writes output blocks from the bottom of the note up, as Run All does. Writing top-down shifted the line numbers used to tell identical cells apart, so cells with the same source (such as repeated `entropy(dist)` cells) could receive each other's outputs.
+
 ## [0.7.0] - 2026-10-11
 
 ### Added
