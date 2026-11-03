@@ -242,6 +242,26 @@ while True:
 
 The block keeps its syntax highlighting but gets no Run button, and Run All and `nb-run` skip it (it is not counted by `--list` or `--cell`). Static site generators that strip fence attributes render it as ordinary code.
 
+### Collapsible source code
+
+Use `input=collapsed` to put a cell's source behind a **Show code** toggle in
+Reading View. Saved output and live output stay visible, and the Run button
+remains available while the source is folded. Source editing is unchanged.
+
+````markdown
+```python {id=example input=collapsed}
+print("The output stays visible")
+```
+````
+
+Set `notebook.input: collapsed` in frontmatter to fold every supported code block
+in a note. An individual cell can override it with `input=show`. The default is
+`show`; unrecognised values fall back to the note's default. Presentation options
+do not change execution, output hashes, or `nb-run` behaviour.
+
+Publishing tools must implement this option too. The plugin does not write HTML
+wrappers into the Markdown file or move saved output blocks.
+
 ### Document-level defaults (frontmatter)
 
 Set defaults for all cells in a note via the `notebook:` key in frontmatter:
@@ -249,6 +269,7 @@ Set defaults for all cells in a note via the `notebook:` key in frontmatter:
 ```yaml
 ---
 notebook:
+  input: collapsed   # optional: fold source in Reading View, keeping output visible
   format: image       # default output format (html | image)
   media: attachments  # image save folder, relative to vault root
   timeout: 60000      # execution timeout in ms

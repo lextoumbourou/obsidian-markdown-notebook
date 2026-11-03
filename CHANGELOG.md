@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- `input=collapsed` folds cell source behind a Show code toggle in Reading View while keeping saved output, live output and execution controls visible. `notebook.input` supplies a note-wide default; `input=show` overrides it per cell. Execution and CLI output persistence are unchanged.
+
 ### Fixed
 
 - `nb-run --write` now writes output blocks from the bottom of the note up, as Run All does. Writing top-down shifted the line numbers used to tell identical cells apart, so cells with the same source (such as repeated `entropy(dist)` cells) could receive each other's outputs.

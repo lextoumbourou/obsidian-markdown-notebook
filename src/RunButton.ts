@@ -40,6 +40,7 @@ import {
   buildBackgroundProgram,
 } from "./BackgroundProgram";
 import { isRunDisabled, parseFenceArgs, parseRunBlocks } from "./CellParser";
+import { parseInputVisibility } from "./InputVisibility";
 
 type AnyKernel = BaseKernel | ShellKernel | DuckDBKernel;
 
@@ -452,7 +453,6 @@ export async function processCodeBlock(
   scheduleRunAllToolbarRender(ctx, context);
   const { app } = context;
 
-  const pre = renderPlainCodeBlock(src, el, language);
   const initialSectionInfo = ctx.getSectionInfo(el);
   let initialArgs: RunArgs = {};
   if (initialSectionInfo) {
@@ -465,14 +465,43 @@ export async function processCodeBlock(
       }
     }
   }
-  // {run=false}: show the code, but it is not a notebook cell.
-  if (isRunDisabled(initialArgs)) return;
-  if (!initialSectionInfo && await isDisabledInNote(app, ctx.sourcePath, src)) return;
+  const candidate = app.vault.getAbstractFileByPath(ctx.sourcePath);
+  const file = candidate instanceof TFile ? candidate : null;
+  if (!initialSectionInfo && file) {
+    try {
+      const note = await app.vault.cachedRead(file);
+      const matches = parseRunBlocks(note).filter((block) =>
+        block.language === language
+        && block.source.replace(/\r\n/g, "\n").replace(/\s+$/, "") === src.replace(/\r\n/g, "\n").replace(/\s+$/, ""),
+      );
+      // Identical source blocks may have different presentation options.
+      if (matches.length === 1) {
+        initialArgs = parseRunArgs(note.split(/\r?\n/)[matches[0].lineStart]);
+      }
+    } catch {
+      // A missing/unreadable note keeps the normal expanded presentation.
+    }
+  }
+  const fm = file ? readNotebookFrontmatter(app, file) : {};
+  const collapsed = (parseInputVisibility(initialArgs.input) ?? fm.input) === "collapsed";
+  const disabled = isRunDisabled(initialArgs)
+    || (!initialSectionInfo && await isDisabledInNote(app, ctx.sourcePath, src));
+  // Keep execution controls and live output outside the source disclosure.
+  const controls = collapsed && !disabled
+    ? el.createDiv({ cls: "nb-run-button-wrap nb-input-controls" })
+    : null;
+  let inputParent = el;
+  if (collapsed) {
+    inputParent = el.createEl("details", { cls: "nb-input" });
+    inputParent.createEl("summary", { text: "Show code" });
+  }
+  const pre = renderPlainCodeBlock(src, inputParent, language);
+  if (disabled) return;
 
   const hash = await hashCodeFence(language, src);
   const flightKey = `${ctx.sourcePath}::${hash}`;
 
-  const buttonWrap = pre.createDiv({ cls: "nb-run-button-wrap" });
+  const buttonWrap = controls ?? pre.createDiv({ cls: "nb-run-button-wrap" });
   const countBadge = buttonWrap.createEl("span", {
     cls: "nb-exec-count",
     text: `[${context.peekExecutionCount(language, ctx.sourcePath)}]`,

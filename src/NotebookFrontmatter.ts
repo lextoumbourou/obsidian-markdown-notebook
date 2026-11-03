@@ -1,7 +1,9 @@
 import { App, TFile } from "obsidian";
+import { InputVisibility, parseInputVisibility } from "./InputVisibility";
 
 /** Document-level defaults from `notebook:` frontmatter key. */
 export interface NotebookFrontmatter {
+  input?: InputVisibility;
   format?: "html" | "image";
   media?: string;
   timeout?: number;
@@ -17,9 +19,10 @@ export interface NotebookFrontmatter {
 }
 
 export function readNotebookFrontmatter(app: App, file: TFile): NotebookFrontmatter {
-  const fm = app.metadataCache.getFileCache(file)?.frontmatter?.notebook;
+  const fm = app.metadataCache?.getFileCache(file)?.frontmatter?.notebook;
   if (!fm || typeof fm !== "object") return {};
   return {
+    input: parseInputVisibility(fm.input),
     format: fm.format === "html" || fm.format === "image" ? fm.format : undefined,
     media: typeof fm.media === "string" ? fm.media : undefined,
     timeout: typeof fm.timeout === "number" ? fm.timeout : undefined,

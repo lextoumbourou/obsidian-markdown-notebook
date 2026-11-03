@@ -51,6 +51,29 @@
   user-select: none;
 }
 
+/* Fold source only; saved and live output remain outside this element. */
+.nb-input {
+  margin: 0 0 1em;
+}
+
+.nb-input > summary {
+  cursor: pointer;
+  color: var(--text-muted);
+  padding: 4px 0;
+}
+
+.nb-input > summary:hover {
+  color: var(--text-normal);
+}
+
+.nb-input > pre {
+  margin-top: 0.5em;
+}
+
+.nb-input-controls {
+  margin: 4px 0 0 8px;
+}
+
 /* Output containers */
 .nb-output {
   border-left: 3px solid var(--interactive-accent);

@@ -28,6 +28,7 @@ class FakeElement {
   parentElement: FakeElement | null = null;
   classList: FakeClassList;
   textContent = '';
+  tagName = 'DIV';
   innerHTML = '';
   disabled = false;
   private listeners = new Map<string, () => void | Promise<void>>();
@@ -42,6 +43,7 @@ class FakeElement {
 
   createEl(_tag: string, options: { cls?: string; text?: string } = {}) {
     const child = new FakeElement(options.cls ?? '');
+    child.tagName = _tag.toUpperCase();
     child.textContent = options.text ?? '';
     child.parentElement = this;
     this.children.push(child);
@@ -175,6 +177,83 @@ describe('Run button', () => {
     const runnable = new FakeElement();
     await processCodeBlock('x = 1', runnable as unknown as HTMLElement, ctx, context as never, 'python');
     expect(runnable.querySelector('.nb-run-button')).not.toBeNull();
+  });
+
+  it.each([
+    { args: 'input=collapsed', noteInput: undefined, collapsed: true },
+    { args: '', noteInput: 'collapsed', collapsed: true },
+    { args: 'input=show', noteInput: 'collapsed', collapsed: false },
+    { args: 'input=invalid', noteInput: 'collapsed', collapsed: true },
+    { args: 'input=collapsed run=false', noteInput: undefined, collapsed: true },
+  ])('honours input presentation for $args with default $noteInput', async ({ args, noteInput, collapsed }) => {
+    const source = 'print(42)';
+    let markdown = `\`\`\`python {${args}}\n${source}\n\`\`\``;
+    const file = new TFile();
+    file.path = 'presentation.md';
+    const app = {
+      metadataCache: { getFileCache: () => ({ frontmatter: { notebook: { input: noteInput } } }) },
+      workspace: { getLeavesOfType: jest.fn(() => []) },
+      vault: {
+        getAbstractFileByPath: () => file,
+        process: async (_file: TFile, transform: (text: string) => string) => { markdown = transform(markdown); },
+      },
+    };
+    const execute = jest.fn(async (_source: string, onChunk: (chunk: unknown) => void) => {
+      expect(root.querySelector('.nb-live-output')?.parentElement).toBe(root);
+      onChunk({ type: 'stream', stream: 'stdout', text: '42\n' });
+    });
+    const ctx = {
+      sourcePath: file.path,
+      getSectionInfo: () => ({ text: markdown, lineStart: 0, lineEnd: 2 }),
+    } as unknown as MarkdownPostProcessorContext;
+    Object.assign(globalThis, { window: {}, HTMLPreElement: FakeElement });
+    const root = new FakeElement();
+    await processCodeBlock(source, root as unknown as HTMLElement, ctx, {
+      app, getSettings: () => DEFAULT_SETTINGS,
+      acquireKernel: () => ({ execute, executionCount: 0 }), peekExecutionCount: () => 0,
+    } as never, 'python');
+
+    const disclosure = root.querySelector('.nb-input');
+    expect(Boolean(disclosure)).toBe(collapsed);
+    if (disclosure) {
+      expect(disclosure.tagName).toBe('DETAILS');
+      expect(disclosure.children[0].textContent).toBe('Show code');
+      expect(disclosure.querySelector('.language-python')?.textContent).toBe(source);
+    }
+    const controls = root.querySelector('.nb-run-button-wrap');
+    if (args.includes('run=false')) {
+      expect(controls).toBeNull();
+    } else {
+      if (collapsed) expect(controls?.parentElement).toBe(root);
+      await root.querySelector('.nb-run-button')!.click();
+      expect(execute).toHaveBeenCalledWith(source, expect.any(Function), 30000, expect.any(AbortSignal));
+      expect(markdown.match(/<!-- nb-output /g)).toHaveLength(1);
+      expect(markdown).toContain('42');
+      expect(markdown).not.toContain('<details');
+    }
+  });
+
+  it('uses a unique cell input option when section info is unavailable', async () => {
+    const file = new TFile();
+    file.path = 'folded.md';
+    const source = 'print(42)';
+    const app = {
+      metadataCache: { getFileCache: () => null },
+      workspace: { getLeavesOfType: jest.fn(() => []) },
+      vault: {
+        getAbstractFileByPath: () => file,
+        cachedRead: async () => `\`\`\`python {input=collapsed}\n${source}\n\`\`\``,
+      },
+    };
+    const root = new FakeElement();
+    Object.assign(globalThis, { window: {}, HTMLPreElement: FakeElement });
+    await processCodeBlock(source + '\n', root as unknown as HTMLElement, {
+      sourcePath: file.path, getSectionInfo: () => null,
+    } as unknown as MarkdownPostProcessorContext, {
+      app, getSettings: () => DEFAULT_SETTINGS, acquireKernel: jest.fn(), peekExecutionCount: () => 0,
+    } as never, 'python');
+    expect(root.querySelector('.nb-input')).not.toBeNull();
+    expect(root.querySelector('.nb-run-button-wrap')?.parentElement).toBe(root);
   });
 
   it('persists escaped traceback output with the failed status', async () => {
